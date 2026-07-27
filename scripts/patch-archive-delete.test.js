@@ -215,6 +215,18 @@ test("accepts exactly one live native route and one live active route", () => {
   assert.equal(result.appMain.code, LATEST_COMBINED_APP_MAIN);
 });
 
+test("ignores active-delete message calls outside the live route table", () => {
+  const consolidated = [
+    LATEST_COMBINED_APP_MAIN,
+    "function sidebarDelete(send,id){return send(`delete-conversation`,{conversationId:id})}",
+  ].join(";");
+
+  const result = patchAppMainSource(consolidated);
+  assert.equal(result.status, "already");
+  assert.equal(result.mode, "combined");
+  assert.equal(result.code, consolidated);
+});
+
 test("rejects detached native archive UI tokens", () => {
   const detachedUi = [
     "const label=`settings.dataControls.archivedChats.delete`;",

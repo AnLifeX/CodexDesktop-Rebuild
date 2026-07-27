@@ -973,7 +973,14 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
       inner.type === "VariableDeclarator" &&
       (inner.init?.type === "ArrowFunctionExpression" || inner.init?.type === "FunctionExpression") &&
       sourceFor(code, inner.init).includes("sidebar_context_menu")
-    ) archiveHandlers.push(inner);
+    ) archiveHandlers.push({ start: inner.start, end: inner.end, init: inner.init });
+    if (
+      inner.type === "AssignmentExpression" &&
+      inner.operator === "=" &&
+      inner.left.type === "Identifier" &&
+      (inner.right?.type === "ArrowFunctionExpression" || inner.right?.type === "FunctionExpression") &&
+      sourceFor(code, inner.right).includes("sidebar_context_menu")
+    ) archiveHandlers.push({ start: inner.start, end: inner.end, init: inner.right });
     if (inner.type === "ObjectExpression") {
       const id = inner.properties.find((property) => propertyName(property) === "id");
       if (literalValue(id?.value) === "archive-thread") archiveItems.push(inner);
@@ -1006,7 +1013,28 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     render.start >= call.arguments[0].start &&
     render.end <= call.arguments[0].end,
   );
-  if (!callback) throw new Error("sidebar renderActions callback is missing");
+  let callbackDependencies = callback?.arguments[1] ?? null;
+  let callbackCacheTest = null;
+  const callbackStatements = node.body.body.filter(
+    (statement) => statement.start <= render.start && statement.end >= render.end,
+  );
+  if (callbackDependencies == null) {
+    if (callbackStatements.length !== 1) {
+      throw new Error("sidebar renderActions callback statement is ambiguous");
+    }
+    const cacheConditions = [];
+    walk(callbackStatements[0], (inner) => {
+      if (
+        inner.type === "ConditionalExpression" &&
+        inner.consequent.start <= render.start &&
+        inner.consequent.end >= render.end
+      ) cacheConditions.push(inner.test);
+    });
+    if (cacheConditions.length !== 1) {
+      throw new Error("sidebar renderActions compiler cache is missing");
+    }
+    callbackCacheTest = cacheConditions[0];
+  }
   const handler = archiveHandlers[0];
   const archiveCall = [];
   walk(handler.init, (inner) => {
@@ -1036,7 +1064,9 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     archiveItem: archiveItems[0],
     messageObject: sourceFor(code, archiveMessage.value.object),
     hoverRender: render,
-    callbackDependencies: callback.arguments[1],
+    callbackDependencies,
+    callbackCacheTest,
+    callbackStatement: callbackStatements[0],
     hoverCount: hoverCounts[0],
     conversationId: valueFor("conversationId"),
     hostId: valueFor("hostId"),
@@ -1540,8 +1570,8 @@ function patchSidebarSource(code) {
     `return(0,${hover.render.jsxAlias}.jsx)(${renderComponent},{actions:[...${hover.spreadNames[0]},...${hover.spreadNames[1]},...CodexSidebarDeleteActions],className:${className}})`;
   const stateInit = sourceFor(code, row.stateDeclaration.init);
   const handlers =
-    `,CodexRequestDelete=()=>{CodexSetDeleteConfirm(!0)},CodexConfirmDelete=()=>{CodexSetDeleteConfirm(!1),` +
-    `CodexDeleteThread({conversationId:${row.conversationId},hostId:${row.hostId},onDeleteSuccess:${row.success},onDeleteError:${row.error}})}`;
+    `let CodexRequestDelete=()=>{CodexSetDeleteConfirm(!0)},CodexConfirmDelete=()=>{CodexSetDeleteConfirm(!1),` +
+    `CodexDeleteThread({conversationId:${row.conversationId},hostId:${row.hostId},onDeleteSuccess:${row.success},onDeleteError:${row.error}})};`;
   const renderObject = row.hoverRender.arguments[1];
   const countValue = sourceFor(code, row.hoverCount.property.value);
   const existingDataAttributes = objectProperties(row.hoverCount.object, "dataAttributes");
@@ -1557,6 +1587,18 @@ function patchSidebarSource(code) {
       text: `(${sourceFor(code, hover.nullTest)})&&CodexDeleteAction==null`,
     },
     { start: hover.tailStart, end: hover.tailEnd, text: deleteActions },
+    row.callbackDependencies != null
+      ? {
+        start: row.callbackDependencies.end - 1,
+        end: row.callbackDependencies.end - 1,
+        text: ",CodexDeleteConfirm,CodexRequestDelete,CodexConfirmDelete",
+      }
+      : {
+        start: row.callbackCacheTest.start,
+        end: row.callbackCacheTest.end,
+        text: `!0||(${sourceFor(code, row.callbackCacheTest)})`,
+      },
+    { start: row.callbackStatement.start, end: row.callbackStatement.start, text: handlers },
     { start: rowFunction.body.start + 1, end: rowFunction.body.start + 1, text: rowMarker },
     { start: row.hookPattern.end - 1, end: row.hookPattern.end - 1, text: ",deleteThread:CodexDeleteThread" },
     {
@@ -1564,7 +1606,6 @@ function patchSidebarSource(code) {
       end: row.stateDeclaration.end,
       text: `,[CodexDeleteConfirm,CodexSetDeleteConfirm]=${stateInit}`,
     },
-    { start: row.handler.end, end: row.handler.end, text: handlers },
     {
       start: row.archiveItem.end,
       end: row.archiveItem.end,
@@ -1574,11 +1615,6 @@ function patchSidebarSource(code) {
       start: renderObject.end - 1,
       end: renderObject.end - 1,
       text: ",deleteAction:{confirming:CodexDeleteConfirm,onRequest:CodexRequestDelete,onConfirm:CodexConfirmDelete}",
-    },
-    {
-      start: row.callbackDependencies.end - 1,
-      end: row.callbackDependencies.end - 1,
-      text: ",CodexDeleteConfirm,CodexRequestDelete,CodexConfirmDelete",
     },
     {
       start: row.hoverCount.property.value.start,
@@ -1598,7 +1634,18 @@ function patchSidebarSource(code) {
       },
   ];
   const next = applySourceReplacements(code, replacements);
-  inspectSidebarPostcondition(next);
+  try {
+    inspectSidebarPostcondition(next);
+  } catch (error) {
+    try {
+      acorn.parse(next, { ecmaVersion: 2022, sourceType: "module" });
+    } catch (parseError) {
+      throw new Error(
+        `${error.message}; generated source parse failed: ${parseError.message}`,
+      );
+    }
+    throw error;
+  }
   return {
     code: next,
     status: "patched",
@@ -1946,8 +1993,14 @@ function planSidebarPlatform({
   sidebarTargets,
   candidates,
 }) {
-  if (platform !== "win") {
+  if (
+    platform !== "win" ||
+    (!Array.isArray(threadActionTargets) && !Array.isArray(sidebarTargets))
+  ) {
     return planMacSidebarPlatform({ platform, candidates: candidates ?? [] });
+  }
+  if (!Array.isArray(threadActionTargets) || !Array.isArray(sidebarTargets)) {
+    throw new Error(`sidebar Windows target sets are incomplete for ${platform}`);
   }
   if (threadActionTargets.length !== 1) {
     throw new Error(
@@ -1988,18 +2041,42 @@ function commitSidebarPlatforms({
   isCheck = false,
   writeFile = fs.writeFileSync,
 }) {
-  return platformPlans.flatMap(({ plan }) =>
+  const writes = platformPlans.flatMap(({ plan }) =>
     commitValidatedPlan({
       plan,
-      writer: (selected) => {
-        const write = selectedSidebarWrite(selected);
-        if (!isCheck && write.result.code !== write.source) {
-          writeFile(write.path, write.result.code, "utf-8");
-        }
-        return write;
-      },
+      writer: selectedSidebarWrite,
     }),
   );
+  if (isCheck) return writes;
+
+  const writesByPath = new Map();
+  for (const write of writes) {
+    const group = writesByPath.get(write.path) ?? [];
+    group.push(write);
+    writesByPath.set(write.path, group);
+  }
+  for (const [filePath, group] of writesByPath) {
+    let code;
+    if (group.length === 1) {
+      code = group[0].result.code;
+    } else {
+      const roles = new Set(group.map((write) => write.role));
+      const sources = new Set(group.map((write) => write.source));
+      if (
+        group.length !== 2 ||
+        roles.size !== 2 ||
+        !roles.has("sidebar-thread-actions") ||
+        !roles.has("sidebar-ui") ||
+        sources.size !== 1
+      ) {
+        throw new Error(`sidebar consolidated target is ambiguous for ${filePath}`);
+      }
+      code = patchThreadActionsSource(group[0].source).code;
+      code = patchSidebarSource(code).code;
+    }
+    if (code !== group[0].source) writeFile(filePath, code, "utf-8");
+  }
+  return writes;
 }
 
 function executeSidebarPlatforms({
@@ -2033,28 +2110,30 @@ function main() {
   if (platforms.length === 0) throw new Error("sidebar-delete expected at least one platform");
   const platformInputs = platforms.map((platformName) => {
     if (platformName === "win") {
-      const threadActionsPath = findExactSidebarAsset(
-        platformName,
-        /^thread-actions-.*\.js$/,
-        "sidebar thread-actions",
-      );
-      const sidebarPath = findExactSidebarAsset(
-        platformName,
-        /^sidebar-flat-sections-.*\.js$/,
-        "sidebar-flat-sections",
-      );
+      const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");
+      if (!fs.existsSync(directory)) {
+        throw new Error(`sidebar asset directory is missing for ${platformName}`);
+      }
+      const candidates = fs.readdirSync(directory)
+        .filter((fileName) => fileName.endsWith(".js"))
+        .map((fileName) => {
+          const filePath = path.join(directory, fileName);
+          return { fileName, path: filePath, source: fs.readFileSync(filePath, "utf-8") };
+        });
       return {
         platform: platformName,
-        threadActionTargets: [{
-          fileName: path.basename(threadActionsPath),
-          path: threadActionsPath,
-          source: fs.readFileSync(threadActionsPath, "utf-8"),
-        }],
-        sidebarTargets: [{
-          fileName: path.basename(sidebarPath),
-          path: sidebarPath,
-          source: fs.readFileSync(sidebarPath, "utf-8"),
-        }],
+        threadActionTargets: candidates.filter(
+          (candidate) =>
+            candidate.source.includes("sidebarElectron.archiveThread") &&
+            candidate.source.includes("copyConversationMarkdown") &&
+            candidate.source.includes("archive-conversation"),
+        ),
+        sidebarTargets: candidates.filter(
+          (candidate) =>
+            candidate.source.includes("thread-primary-action") &&
+            candidate.source.includes("archive-thread") &&
+            candidate.source.includes("additionalHoverActionCount"),
+        ),
       };
     }
     const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");

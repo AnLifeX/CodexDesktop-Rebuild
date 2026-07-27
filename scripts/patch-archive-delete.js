@@ -626,8 +626,15 @@ function inspectArchiveAppMainSource(source) {
   const tokens = { native: 0, legacy: 0 };
   walkArchiveWithAncestors(ast, (node, ancestors) => {
     const value = archiveLiteral(node);
-    if (value === "delete-archived-conversation") tokens.native += 1;
-    if (value === "delete-conversation") tokens.legacy += 1;
+    const parent = ancestors.at(-1);
+    const isMessageArgument =
+      parent?.type === "CallExpression" && parent.arguments.includes(node);
+    if (!isMessageArgument && value === "delete-archived-conversation") {
+      tokens.native += 1;
+    }
+    if (!isMessageArgument && value === "delete-conversation") {
+      tokens.legacy += 1;
+    }
     if (node.type !== "Property") return;
     const name = archivePropertyName(node);
     if (name === "delete-archived-conversation") properties.native.push({ property: node, ancestors });
@@ -1329,8 +1336,14 @@ function planArchivePlatform({
   dataControlsTargets,
   candidates,
 }) {
-  if (platform !== "win") {
+  if (
+    platform !== "win" ||
+    (!Array.isArray(appMainTargets) && !Array.isArray(dataControlsTargets))
+  ) {
     return planMacArchivePlatform({ platform, candidates: candidates ?? [] });
+  }
+  if (!Array.isArray(appMainTargets) || !Array.isArray(dataControlsTargets)) {
+    throw new Error(`archive Windows target sets are incomplete for ${platform}`);
   }
   if (appMainTargets.length !== 1) {
     throw new Error(
@@ -1425,24 +1438,30 @@ function main() {
   if (platforms.length === 0) throw new Error("archive-delete expected at least one platform");
   const platformInputs = platforms.map((platformName) => {
     if (platformName === "win") {
-      const appMainPath = findExactAsset(platformName, /^app-main-.*\.js$/, "archive app-main");
-      const dataControlsPath = findExactAsset(
-        platformName,
-        /^data-controls-.*\.js$/,
-        "archive data-controls",
+      const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");
+      if (!fs.existsSync(directory)) {
+        throw new Error(`archive asset directory is missing for ${platformName}`);
+      }
+      const candidates = fs.readdirSync(directory)
+        .filter((fileName) => fileName.endsWith(".js"))
+        .map((fileName) => {
+          const filePath = path.join(directory, fileName);
+          return { fileName, path: filePath, source: fs.readFileSync(filePath, "utf-8") };
+        });
+      const appMainTargets = candidates.filter(
+        (candidate) =>
+          candidate.source.includes("archive-conversation") &&
+          candidate.source.includes(".archiveConversation("),
+      );
+      const dataControlsTargets = candidates.filter(
+        (candidate) =>
+          /^data-controls-.*\.js$/.test(candidate.fileName) &&
+          mayContainArchiveDataControlsContract(candidate.source),
       );
       return {
         platform: platformName,
-        appMainTargets: [{
-          fileName: path.basename(appMainPath),
-          path: appMainPath,
-          source: fs.readFileSync(appMainPath, "utf-8"),
-        }],
-        dataControlsTargets: [{
-          fileName: path.basename(dataControlsPath),
-          path: dataControlsPath,
-          source: fs.readFileSync(dataControlsPath, "utf-8"),
-        }],
+        appMainTargets,
+        dataControlsTargets,
       };
     }
     const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");

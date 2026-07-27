@@ -807,16 +807,15 @@ function collectWebviewHookTopology(ast) {
 
   const hooks = new Map();
   for (const context of FEATURE_CONTEXTS) {
-    const candidates = hooksByContext.get(context);
+    const candidates = hooksByContext
+      .get(context)
+      .filter((candidate) => exportedFunctions.has(candidate));
     if (candidates.length !== 1) {
       throw new Error(
-        `plugin webview hook ${context} expected exactly 1 function, found ${candidates.length}`,
+        `plugin webview hook ${context} expected exactly 1 exported function, found ${candidates.length}`,
       );
     }
     const hook = candidates[0];
-    if (!exportedFunctions.has(hook)) {
-      throw new Error(`plugin webview hook ${context} is not exported`);
-    }
     hooks.set(context, hook);
   }
 
@@ -1773,6 +1772,20 @@ function planPluginPlatform({ platform, candidates }) {
     }
     for (const kind of ["main", "webview"]) {
       if (matches[kind].length !== 1) {
+        if (kind === "webview" && matches[kind].length === 0) {
+          const semanticCandidates = candidates.filter((candidate) => {
+            const candidatePath = normalizePluginCandidate(candidate).path.replaceAll("\\", "/");
+            if (candidatePath.includes("/.vite/build/") || candidatePath.startsWith(".vite/build/")) {
+              return /^main-.*\.js$/.test(candidate.fileName);
+            }
+            return (
+              candidate.source.includes("authMethod") &&
+              candidate.source.includes("browser_use_external") &&
+              candidate.source.includes("computer_use")
+            );
+          });
+          return planMacPluginPlatform({ platform, candidates: semanticCandidates });
+        }
         throw new Error(
           `plugin ${kind} expected exactly 1 target for ${platform}, found ${matches[kind].length}`,
         );

@@ -325,6 +325,36 @@ test("Windows plugin planning ignores a webview main bootstrap decoy", () => {
   assert.deepEqual(result.writes[0].matches.webview, [webview]);
 });
 
+test("Windows plugin planning locates exported hooks in a consolidated app-initial bundle", () => {
+  const main = {
+    fileName: "main-current.js",
+    filePath: ".vite/build/main-current.js",
+    source: LATEST_MAIN_FIXTURE,
+  };
+  const webview = {
+    fileName: "app-initial-current.js",
+    filePath: "webview/assets/app-initial-current.js",
+    source: [
+      LATEST_WEBVIEW_FIXTURE,
+      "function fastSettings(e,r){return e.authMethod===`chatgpt`&&r.featureRequirements.fast_mode}",
+      "function unrelatedAccount(e){return e.authMethod===`chatgpt`&&e.accountId}",
+    ].join(";"),
+  };
+
+  const result = planPluginPlatform({
+    platform: "win",
+    candidates: [main, webview],
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(result.writes[0].matches.webview, [webview]);
+  assert.deepEqual(result.writes[0].result.webview.counts.auth, {
+    patchable: 1,
+    already: 0,
+    total: 1,
+  });
+});
+
 function validMacPluginCandidates(prefix) {
   return [
     {
