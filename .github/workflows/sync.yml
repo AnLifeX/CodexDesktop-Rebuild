@@ -104,65 +104,38 @@ jobs:
       - name: Build Windows portable app
         run: npm run build:win-x64
 
-      - name: Build guaranteed full Windows installer
-        id: windows_full
-        timeout-minutes: 30
-        env:
-          CODEX_REBUILD_NO_DELTA: "1"
-          DEBUG: electron-windows-installer:*
-        run: npm run build:win-installer
-
-      - name: Back up guaranteed full Windows installer
-        shell: pwsh
-        run: |
-          $source = Join-Path $PWD.Path "out/make/squirrel.windows/x64"
-          $backup = Join-Path $PWD.Path "out/full-only-squirrel"
-          if (-not (Test-Path -LiteralPath $source -PathType Container)) {
-            throw "Guaranteed full installer output is missing: $source"
-          }
-          if (Test-Path -LiteralPath $backup) {
-            throw "Refusing to overwrite unexpected full installer backup: $backup"
-          }
-          Move-Item -LiteralPath $source -Destination $backup
-
-      - name: Attempt Windows delta package
+      - name: Build Windows installer with required delta
         id: windows_delta
-        continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 60
         env:
           DEBUG: electron-windows-installer:*
         run: npm run build:win-installer
 
-      - name: Finalize Windows installer output
-        if: always() && steps.windows_full.outcome == 'success'
+      - name: Verify required Windows delta package
         env:
-          DELTA_OUTCOME: ${{ steps.windows_delta.outcome }}
+          EXPECTED_VERSION: ${{ steps.windows_version.outputs.windows_package_version }}
         shell: pwsh
         run: |
           $output = Join-Path $PWD.Path "out/make/squirrel.windows/x64"
-          $backup = Join-Path $PWD.Path "out/full-only-squirrel"
-          if (-not (Test-Path -LiteralPath $backup -PathType Container)) {
-            throw "Guaranteed full installer backup is missing: $backup"
+          if (-not (Test-Path -LiteralPath $output -PathType Container)) {
+            throw "Windows installer output is missing: $output"
           }
-          if ($env:DELTA_OUTCOME -ne "success") {
-            if (Test-Path -LiteralPath $output) {
-              Remove-Item -LiteralPath $output -Recurse -Force
-            }
-            New-Item -ItemType Directory -Path (Split-Path -Parent $output) -Force | Out-Null
-            Move-Item -LiteralPath $backup -Destination $output
-            Write-Host "Delta outcome was '$env:DELTA_OUTCOME'; restored guaranteed full-only output."
-          } else {
-            if (-not (Test-Path -LiteralPath $output -PathType Container)) {
-              throw "Delta attempt reported success but installer output is missing: $output"
-            }
-            Remove-Item -LiteralPath $backup -Recurse -Force
-            $delta = Get-ChildItem -LiteralPath $output -Filter "*-delta.nupkg" -File
-            if ($delta) {
-              Write-Host "Delta package generated: $($delta.Name)"
-            } else {
-              Write-Host "Delta command completed but no delta package was produced; keeping full output."
+          $fullName = "Codex-$($env:EXPECTED_VERSION)-full.nupkg"
+          $deltaName = "Codex-$($env:EXPECTED_VERSION)-delta.nupkg"
+          foreach ($name in @($fullName, $deltaName, "RELEASES")) {
+            $file = Join-Path $output $name
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Required Windows update artifact is missing: $file"
             }
           }
+          $referenced = Get-Content -LiteralPath (Join-Path $output "RELEASES") |
+            ForEach-Object { ($_ -split '\s+')[1] }
+          foreach ($name in @($fullName, $deltaName)) {
+            if ($name -notin $referenced) {
+              throw "RELEASES does not reference required package: $name"
+            }
+          }
+          Write-Host "Required delta package generated: $deltaName"
 
       - name: Resolve Windows artifact versions
         id: windows_artifacts

@@ -185,33 +185,31 @@ function namedWorkflowStep(workflow, name) {
   )?.groups.body;
 }
 
-function assertFullFirstWindowsInstallerWorkflow(workflow, { supportsSkip }) {
+function assertRequiredDeltaWindowsInstallerWorkflow(workflow, { supportsSkip }) {
   const configure = namedWorkflowStep(workflow, "Configure Windows update feed");
-  const full = namedWorkflowStep(workflow, "Build guaranteed full Windows installer");
-  const backup = namedWorkflowStep(workflow, "Back up guaranteed full Windows installer");
-  const delta = namedWorkflowStep(workflow, "Attempt Windows delta package");
-  const finalize = namedWorkflowStep(workflow, "Finalize Windows installer output");
+  const fullOnly = namedWorkflowStep(workflow, "Build full-only Windows installer");
+  const delta = namedWorkflowStep(workflow, "Build Windows installer with required delta");
+  const verify = namedWorkflowStep(workflow, "Verify required Windows delta package");
 
   assert.ok(configure, "Windows update feed configuration step should exist");
   assert.match(configure, /CODEX_REBUILD_UPDATE_URL=\$feed/);
   assert.match(configure, /CODEX_REBUILD_REMOTE_RELEASES=\$feed/);
   assert.doesNotMatch(configure, /CODEX_REBUILD_NO_DELTA/);
 
-  assert.ok(full, "guaranteed full installer step should exist");
-  assert.match(full, /id: windows_full/);
-  assert.match(full, /timeout-minutes: 30/);
-  assert.match(full, /CODEX_REBUILD_NO_DELTA: "1"/);
-  assert.match(full, /npm run build:win-installer/);
+  if (supportsSkip) {
+    assert.ok(fullOnly, "manual workflow should support an explicit full-only build");
+    assert.match(fullOnly, /if: inputs\.skip_windows_delta == true/);
+    assert.match(fullOnly, /timeout-minutes: 30/);
+    assert.match(fullOnly, /CODEX_REBUILD_NO_DELTA: "1"/);
+    assert.match(fullOnly, /npm run build:win-installer/);
+  } else {
+    assert.equal(fullOnly, undefined, "automatic releases must not silently build full-only");
+  }
 
-  assert.ok(backup, "full installer backup step should exist");
-  assert.match(backup, /out[\\/]make[\\/]squirrel\.windows[\\/]x64/);
-  assert.match(backup, /out[\\/]full-only-squirrel/);
-  assert.match(backup, /Move-Item/);
-
-  assert.ok(delta, "bounded delta attempt step should exist");
+  assert.ok(delta, "required delta build step should exist");
   assert.match(delta, /id: windows_delta/);
-  assert.match(delta, /continue-on-error: true/);
-  assert.match(delta, /timeout-minutes: 10/);
+  assert.doesNotMatch(delta, /continue-on-error/);
+  assert.match(delta, /timeout-minutes: 60/);
   assert.match(delta, /npm run build:win-installer/);
   assert.doesNotMatch(delta, /CODEX_REBUILD_NO_DELTA/);
   if (supportsSkip) {
@@ -220,23 +218,25 @@ function assertFullFirstWindowsInstallerWorkflow(workflow, { supportsSkip }) {
     assert.doesNotMatch(delta, /skip_windows_delta/);
   }
 
-  assert.ok(finalize, "installer fallback finalization step should exist");
-  assert.match(finalize, /if: always\(\) && steps\.windows_full\.outcome == 'success'/);
-  assert.match(finalize, /DELTA_OUTCOME: \$\{\{ steps\.windows_delta\.outcome \}\}/);
-  assert.match(finalize, /\$env:DELTA_OUTCOME -ne "success"/);
-  assert.match(finalize, /Move-Item/);
-  assert.match(finalize, /Remove-Item/);
+  assert.ok(verify, "required delta output should be verified before publishing");
+  assert.match(verify, /EXPECTED_VERSION: \$\{\{ steps\.windows_version\.outputs\.windows_package_version \}\}/);
+  assert.match(verify, /-full\.nupkg/);
+  assert.match(verify, /-delta\.nupkg/);
+  assert.match(verify, /RELEASES does not reference required package/);
+  if (supportsSkip) {
+    assert.match(verify, /if: inputs\.skip_windows_delta != true/);
+  } else {
+    assert.doesNotMatch(verify, /skip_windows_delta/);
+  }
 
-  const fullIndex = workflow.indexOf("name: Build guaranteed full Windows installer");
-  const backupIndex = workflow.indexOf("name: Back up guaranteed full Windows installer");
-  const deltaIndex = workflow.indexOf("name: Attempt Windows delta package");
-  const finalizeIndex = workflow.indexOf("name: Finalize Windows installer output");
+  const deltaIndex = workflow.indexOf("name: Build Windows installer with required delta");
+  const verifyIndex = workflow.indexOf("name: Verify required Windows delta package");
   const resolveIndex = workflow.indexOf("name: Resolve Windows artifact versions");
-  assert.ok(fullIndex < backupIndex && backupIndex < deltaIndex && deltaIndex < finalizeIndex);
-  assert.ok(finalizeIndex < resolveIndex, "fallback must finish before artifacts are resolved");
+  assert.ok(deltaIndex < verifyIndex && verifyIndex < resolveIndex);
+  assert.doesNotMatch(workflow, /Back up guaranteed full Windows installer|Finalize Windows installer output/);
 }
 
-test("Windows workflows guarantee full installers and bound optional delta generation", () => {
+test("Windows release workflows require delta output with a one-hour bound", () => {
   const buildWorkflow = fs.readFileSync(
     path.join(__dirname, "..", ".github", "workflows", "build.yml"),
     "utf-8",
@@ -250,11 +250,11 @@ test("Windows workflows guarantee full installers and bound optional delta gener
     buildWorkflow,
     /skip_windows_delta:\s*\n(?:\s+.*\n)*?\s+default: false\s*\n\s+type: boolean/,
   );
-  assertFullFirstWindowsInstallerWorkflow(buildWorkflow, { supportsSkip: true });
-  assertFullFirstWindowsInstallerWorkflow(syncWorkflow, { supportsSkip: false });
+  assertRequiredDeltaWindowsInstallerWorkflow(buildWorkflow, { supportsSkip: true });
+  assertRequiredDeltaWindowsInstallerWorkflow(syncWorkflow, { supportsSkip: false });
 });
 
-test("manual delta test reuses artifacts without publishing and has a 30 minute limit", () => {
+test("manual delta test reuses artifacts without publishing and has a one-hour limit", () => {
   const workflow = fs.readFileSync(
     path.join(__dirname, "..", ".github", "workflows", "windows-delta-test.yml"),
     "utf-8",
@@ -269,7 +269,7 @@ test("manual delta test reuses artifacts without publishing and has a 30 minute 
   const delta = namedWorkflowStep(workflow, "Generate delta package");
   assert.ok(delta, "delta-only workflow should have a bounded generation step");
   assert.match(delta, /continue-on-error: true/);
-  assert.match(delta, /timeout-minutes: 30/);
+  assert.match(delta, /timeout-minutes: 60/);
   assert.match(delta, /SQUIRREL_EXE/);
   assert.match(delta, /--releasify/);
   assert.match(workflow, /targetRawName/);
