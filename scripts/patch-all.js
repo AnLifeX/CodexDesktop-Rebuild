@@ -24,6 +24,7 @@ const PATCHES = [
   "patch-plugin-auth.js",
   "patch-windows-native-paths.js",
   "patch-computer-use-win10.js",
+  "patch-computer-use-win10-fallback.js",
   "patch-updater.js",
   "patch-local-updater.js",
   "patch-archive-delete.js",
