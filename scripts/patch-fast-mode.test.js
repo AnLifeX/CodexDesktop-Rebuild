@@ -490,23 +490,23 @@ test("platform orchestrator plans every platform before commit writes", async (t
   });
 });
 
-test("Windows keeps filename-exact target selection", () => {
-  assert.throws(
-    () =>
-      planFastModePlatform({
-        platform: "win",
-        candidates: [
-          {
-            fileName: "consolidated-settings.js",
-            source: LATEST_FAST_MODE_FIXTURE,
-          },
-          {
-            fileName: "read-service-tier-for-request-win.js",
-            source: LATEST_FAST_REQUEST_FIXTURE,
-          },
-        ],
-      }),
-    /settings.*expected exactly 1.*found 0/i,
+test("Windows accepts the consolidated semantic bundle used by current releases", () => {
+  const source = `${LATEST_FAST_MODE_FIXTURE};${LATEST_FAST_REQUEST_FIXTURE}`;
+  const result = planFastModePlatform({
+    platform: "win",
+    candidates: [{
+      path: "webview/assets/app-initial-Windows.js",
+      fileName: "app-initial-Windows.js",
+      source,
+    }],
+  });
+  assert.equal(result.status, "ready");
+  assert.deepEqual(
+    result.writes.map(({ role, fileName }) => [role, fileName]),
+    [
+      ["fast-settings", "app-initial-Windows.js"],
+      ["fast-request", "app-initial-Windows.js"],
+    ],
   );
 });
 

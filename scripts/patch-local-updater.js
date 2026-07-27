@@ -1650,6 +1650,200 @@ function bindWebviewMenuBarPatch(patch, shape) {
   return next;
 }
 
+const MODERN_UPDATER_COMPONENT = "codexRebuildUpdaterTitlebar";
+
+function makeModernWebviewTitlebarComponent(shape, version = LOCAL_UPDATER_CONTRACT_VERSION) {
+  const legacyBody = makeWebviewMenuBarFunctionBody();
+  const legacyComponentStart = legacyBody.indexOf("function Yr(){");
+  if (legacyComponentStart < 0) {
+    throw new Error("Windows modern updater helper template is malformed");
+  }
+  const helpers = legacyBody
+    .slice(0, legacyComponentStart)
+    .replaceAll("Zr.", `${shape.jsxAlias}.`);
+  const component = `function ${MODERN_UPDATER_COMPONENT}(){let[r,i]=(0,${shape.reactAlias}.useState)({status:'idle'}),[a,o]=(0,${shape.reactAlias}.useState)(false),c=(0,${shape.reactAlias}.useRef)(null);
+  (0,${shape.reactAlias}.useEffect)(()=>{codexRebuildUpdaterEnsureTitlebarStyle();let e=window.codexRebuildUpdater;if(!e)return;let t=e=>{i(e||{status:'idle'})};e.getState?.().then(t).catch(()=>{});let n=e.onState?.(t);return typeof n==='function'?n:void 0},[]);
+  (0,${shape.reactAlias}.useEffect)(()=>{if(!a)return;let e=e=>{c.current?.contains?.(e.target)||o(false)},t=e=>{e.key==='Escape'&&o(false)};return document.addEventListener('pointerdown',e,true),document.addEventListener('keydown',t,true),()=>{document.removeEventListener('pointerdown',e,true),document.removeEventListener('keydown',t,true)}},[a]);
+  let u=(e,t={})=>i(n=>({...n,...t,status:e}));
+  let d=e=>{let t=window.codexRebuildUpdater;if(e==='close'){o(false);return}if(e==='clear'){o(false),t?.clearUpdateState?.().then(i).catch(()=>{});return}if(e==='cancel'){t?.cancelDownload?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='check'){o(true),u('checking',{error:null}),t?.checkForUpdates?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='retry'){o(true),u('downloading',{error:null}),t?.retryUpdate?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='download'){o(true),u('downloading',{error:null,downloadedBytes:r?.downloadedBytes||0,elapsedMs:0}),t?.downloadUpdate?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='install'){t?.installUpdate?.().catch(e=>u('error',{error:e&&e.message?e.message:String(e)}))}};
+  let f=()=>{let e=r?.status||'idle';if(e==='idle'){d('check');return}o(e=>!e)},p=codexRebuildUpdaterMenuBarLabel(r),m=codexRebuildUpdaterMenuBarProgress(r),h=m==null?0:Math.floor(m);
+  return(0,${shape.jsxAlias}.jsxs)('div',{ref:c,className:'cru-anchor',children:[(0,${shape.jsxAlias}.jsxs)('button',{type:'button','aria-expanded':a,'aria-haspopup':'dialog','aria-label':p,className:'cru-trigger '+(r?.status||'idle')+(a?' open':''),style:{'--cru-progress':h+'%'},onClick:f,children:[(0,${shape.jsxAlias}.jsx)('span',{className:'cru-mark','aria-hidden':'true'}),(0,${shape.jsxAlias}.jsx)('span',{className:'cru-label',children:p})]}),a&&codexRebuildUpdaterBuildPanel(r,d)]})
+}`;
+  const body = `${helpers}${component}`;
+  if (version == null) return body;
+  return `${WEBVIEW_COMPONENT_START_MARKER}\n${layerVersionMarker(
+    "titlebar-component",
+    version,
+  )}\n${body}\n${WEBVIEW_COMPONENT_END_MARKER}`;
+}
+
+function makeModernWebviewTitlebarAttachment(shape, version = LOCAL_UPDATER_CONTRACT_VERSION) {
+  const call = `(0,${shape.jsxAlias}.jsx)(${MODERN_UPDATER_COMPONENT},{})`;
+  if (version == null) return call;
+  return `${WEBVIEW_DESCRIPTOR_START_MARKER}\n${layerVersionMarker(
+    "titlebar-descriptor",
+    version,
+  )}\n${call}\n${WEBVIEW_DESCRIPTOR_END_MARKER}`;
+}
+
+function analyzeModernWebviewMenuBarCode(code) {
+  const ast = acorn.parse(code, { ecmaVersion: "latest", sourceType: "module" });
+  const candidates = [];
+  walkAst(ast, (node) => {
+    if (node.type !== "FunctionDeclaration" || node.id?.type !== "Identifier") return;
+    const source = code.slice(node.start, node.end);
+    if (
+      source.includes("menubar-selection-background") &&
+      source.includes("application-menu-content") &&
+      source.includes("no-drag")
+    ) candidates.push(node);
+  });
+  if (candidates.length !== 1) {
+    throw new Error(`expected one modern Windows webview menu-bar function, found ${candidates.length}`);
+  }
+  const menuFunction = candidates[0];
+  const reactAliases = [];
+  const jsxAliases = [];
+  const roots = [];
+  walkAst(menuFunction, (node) => {
+    const reactAlias = sequenceMember(node, "useState");
+    if (reactAlias) reactAliases.push(reactAlias);
+    const jsxAlias = sequenceMember(node, "jsx") || sequenceMember(node, "jsxs");
+    if (jsxAlias) jsxAliases.push(jsxAlias);
+    if (
+      sequenceMember(node, "jsxs") &&
+      node.arguments[0]?.type === "MemberExpression" &&
+      !node.arguments[0].computed &&
+      node.arguments[0].property?.type === "Identifier" &&
+      node.arguments[0].property.name === "Root" &&
+      node.arguments[1]?.type === "ObjectExpression"
+    ) {
+      const className = node.arguments[1].properties.find(
+        (property) => propertyName(property) === "className",
+      );
+      const children = node.arguments[1].properties.find(
+        (property) => propertyName(property) === "children",
+      );
+      const classSource = className ? code.slice(className.value.start, className.value.end) : "";
+      if (
+        classSource.includes("flex items-center gap-0.5") &&
+        children?.value.type === "ArrayExpression"
+      ) roots.push({ call: node, children: children.value });
+    }
+  });
+  if (roots.length !== 1) {
+    throw new Error(`modern Windows webview menu-bar root expected exactly 1 target, found ${roots.length}`);
+  }
+  return {
+    dialect: "modern",
+    functionName: menuFunction.id.name,
+    reactAlias: onlyValue(reactAliases, "modern React binding"),
+    jsxAlias: onlyValue(jsxAliases, "modern JSX binding"),
+    menuFunction,
+    rootCall: roots[0].call,
+    rootChildren: roots[0].children,
+  };
+}
+
+function inspectModernUpdaterTitlebarSource(code) {
+  const functionCount = countOccurrences(code, `function ${MODERN_UPDATER_COMPONENT}()`);
+  if (functionCount !== 1) {
+    throw new Error(`Windows modern updater component expected exactly 1 target, found ${functionCount}`);
+  }
+  const ast = parseJavaScript(code, "Windows modern updater titlebar", "module");
+  const shape = analyzeModernWebviewMenuBarCode(code);
+  const componentRange = markerRange(
+    code,
+    WEBVIEW_COMPONENT_START_MARKER,
+    WEBVIEW_COMPONENT_END_MARKER,
+    "Windows modern updater component",
+  );
+  const attachmentRange = markerRange(
+    code,
+    WEBVIEW_DESCRIPTOR_START_MARKER,
+    WEBVIEW_DESCRIPTOR_END_MARKER,
+    "Windows modern updater attachment",
+  );
+  const componentBindings = ast.body.filter(
+    (statement) =>
+      statement.type === "FunctionDeclaration" &&
+      statement.id?.name === MODERN_UPDATER_COMPONENT,
+  );
+  const attachmentCalls = [];
+  walkAst(ast, (node) => {
+    if (
+      node.type === "CallExpression" &&
+      (sequenceMember(node, "jsx") || sequenceMember(node, "jsxs")) === shape.jsxAlias &&
+      node.arguments[0]?.type === "Identifier" &&
+      node.arguments[0].name === MODERN_UPDATER_COMPONENT
+    ) attachmentCalls.push(node);
+  });
+  if (componentBindings.length !== 1 || attachmentCalls.length !== 1) {
+    throw new Error(
+      `Windows modern updater live binding expected exactly 1/1 component and attachment, found ${componentBindings.length}/${attachmentCalls.length}`,
+    );
+  }
+  const attachment = attachmentCalls[0];
+  if (
+    !shape.rootChildren.elements.some(
+      (element) => element?.start === attachment.start && element?.end === attachment.end,
+    ) ||
+    attachment.start < attachmentRange.start ||
+    attachment.end > attachmentRange.end
+  ) {
+    throw new Error("Windows modern updater attachment is detached from the live menu-bar root");
+  }
+  const expectedComponent = makeModernWebviewTitlebarComponent(shape);
+  const expectedAttachment = makeModernWebviewTitlebarAttachment(shape);
+  if (
+    componentRange.code !== expectedComponent ||
+    attachmentRange.code !== expectedAttachment
+  ) {
+    throw new Error(
+      "Windows modern updater canonical bytes do not match " +
+        `(component diff ${firstDifferenceIndex(componentRange.code, expectedComponent)}, ` +
+        `attachment diff ${firstDifferenceIndex(attachmentRange.code, expectedAttachment)})`,
+    );
+  }
+  const expectedVersions = [
+    layerVersionMarker("titlebar-component"),
+    layerVersionMarker("titlebar-descriptor"),
+  ].sort();
+  const versions = updaterVersionSignatures(code).sort();
+  if (
+    versions.length !== expectedVersions.length ||
+    versions.some((version, index) => version !== expectedVersions[index])
+  ) {
+    throw new Error("Windows modern updater titlebar version is stale or mismatched");
+  }
+  return {
+    layer: "titlebar",
+    version: LOCAL_UPDATER_CONTRACT_VERSION,
+    dialect: "modern",
+    functionName: shape.functionName,
+    menuArrayName: null,
+    canonicalSource: code,
+  };
+}
+
+function patchModernWebviewMenuBarCode(code) {
+  const shape = analyzeModernWebviewMenuBarCode(code);
+  const next = applyReplacements(code, [
+    {
+      start: shape.rootChildren.end - 1,
+      end: shape.rootChildren.end - 1,
+      text: `,${makeModernWebviewTitlebarAttachment(shape)}`,
+    },
+    {
+      start: shape.menuFunction.start,
+      end: shape.menuFunction.start,
+      text: `${makeModernWebviewTitlebarComponent(shape)}\n`,
+    },
+  ]);
+  inspectModernUpdaterTitlebarSource(next);
+  return next;
+}
+
 function hasTitlebarSignature(code) {
   return [
     WEBVIEW_COMPONENT_START_MARKER,
@@ -1852,6 +2046,9 @@ function assertRenderedTitlebarComponent(ast, shape) {
 function inspectUpdaterTitlebarSource(code, { allowLegacy = false } = {}) {
   if (typeof code !== "string" || code.trim() === "") {
     throw new Error("Windows webview updater titlebar source is empty");
+  }
+  if (code.includes(`function ${MODERN_UPDATER_COMPONENT}()`)) {
+    return inspectModernUpdaterTitlebarSource(code);
   }
   const functionCount = countOccurrences(
     code,
@@ -2076,6 +2273,12 @@ function patchWebviewMenuBarCode(code) {
     if (inspection.dialect === "current") return code;
     validateUpdaterTitlebarSource(inspection.canonicalSource);
     return inspection.canonicalSource;
+  }
+  if (
+    code.includes("menubar-selection-background") &&
+    code.includes("application-menu-content")
+  ) {
+    return patchModernWebviewMenuBarCode(code);
   }
   const shape = analyzeWebviewMenuBarCode(code);
   const next = applyReplacements(code, [
@@ -2747,7 +2950,7 @@ function validateLocalUpdaterSources({ packageSource, files, expectedUpdateUrl }
 
   const titlebarEvidence = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^webview\/assets\/app-shell-.*\.js$/.test(fileName)) continue;
+    if (!/^webview\/assets\/(?:app-shell|app-initial)-.*\.js$/.test(fileName)) continue;
     if (!hasTitlebarSignature(String(source || ""))) continue;
     let inspection;
     try {
@@ -2814,7 +3017,7 @@ function selectMainMenuTarget(normalizedFiles) {
 function selectTitlebarTarget(normalizedFiles) {
   const candidates = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^webview\/assets\/app-shell-.*\.js$/.test(fileName)) continue;
+    if (!/^webview\/assets\/(?:app-shell|app-initial)-.*\.js$/.test(fileName)) continue;
     if (hasTitlebarSignature(String(source || ""))) {
       try {
         candidates.push({ path: fileName, code: patchWebviewMenuBarCode(source) });
@@ -2823,9 +3026,16 @@ function selectTitlebarTarget(normalizedFiles) {
       }
       continue;
     }
-    if (!source.includes("windowsMenuBar.help") || !source.includes("showApplicationMenu")) continue;
+    const isLegacy =
+      source.includes("windowsMenuBar.help") &&
+      source.includes("showApplicationMenu");
+    const isModern =
+      source.includes("menubar-selection-background") &&
+      source.includes("application-menu-content");
+    if (!isLegacy && !isModern) continue;
     try {
-      analyzeWebviewMenuBarCode(source);
+      if (isModern) analyzeModernWebviewMenuBarCode(source);
+      else analyzeWebviewMenuBarCode(source);
       candidates.push({ path: fileName, code: patchWebviewMenuBarCode(source) });
     } catch {
       // Other app-shell chunks may mention menu messages without rendering the titlebar.
@@ -2948,7 +3158,7 @@ function collectLocalUpdaterSources(asarRoot) {
     }
   }
   for (const fileName of fs.readdirSync(assetsDir)) {
-    if (/^app-shell-.*\.js$/.test(fileName)) {
+    if (/^(?:app-shell|app-initial)-.*\.js$/.test(fileName)) {
       files[`webview/assets/${fileName}`] = fs.readFileSync(path.join(assetsDir, fileName), "utf-8");
     }
   }

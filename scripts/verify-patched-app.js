@@ -2,13 +2,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { parse } = require("acorn");
-const { planFastModeTargets } = require("./patch-fast-mode");
+const { planFastModePlatform } = require("./patch-fast-mode");
 const {
-  classifyPluginTarget,
-  patchPluginContracts,
+  planPluginPlatform,
 } = require("./patch-plugin-auth");
-const { patchArchiveContracts } = require("./patch-archive-delete");
-const { patchSidebarContracts } = require("./patch-sidebar-delete");
+const { planArchivePlatform } = require("./patch-archive-delete");
+const { planSidebarPlatform } = require("./patch-sidebar-delete");
 const { validateLocalUpdaterSources } = require("./patch-local-updater");
 
 const PROJECT_ROOT = path.join(__dirname, "..");
@@ -770,28 +769,52 @@ function requireExactlyOneSource(sources, pattern, label) {
   return matches[0];
 }
 
+function patchCandidates(sources, roots) {
+  return sources
+    .filter(({ file }) => roots.some((root) => file.includes(`/${root}/`)))
+    .filter(({ file }) => file.endsWith(".js"))
+    .map(({ file, source }) => ({
+      fileName: path.posix.basename(file),
+      filePath: file,
+      path: file,
+      source,
+    }));
+}
+
+function uniquePlanFiles(entries) {
+  return [...new Set(entries.map((entry) => entry.filePath ?? entry.path))].sort();
+}
+
 function inspectFastContract(sources) {
   try {
-    const candidates = sources
-      .filter(({ file }) =>
-        /\/use-service-tier-settings-[^/]+\.js$/.test(file) ||
-        /\/read-service-tier-for-request-[^/]+\.js$/.test(file),
-      )
-      .map(({ file, source }) => ({
-        file,
-        fileName: path.posix.basename(file),
-        source,
-      }));
-    const plans = planFastModeTargets(candidates, "win verifier");
+    const candidates = patchCandidates(sources, ["webview/assets"]).filter(
+      ({ fileName, source }) =>
+        source.includes("fast_mode") ||
+        source.includes("CodexRebuildFastModeModelCapabilityOnly") ||
+        /^use-service-tier-settings-.*\.js$/.test(fileName) ||
+        /^read-service-tier-for-request-.*\.js$/.test(fileName),
+    );
+    const legacyCounts = [
+      /^use-service-tier-settings-.*\.js$/,
+      /^read-service-tier-for-request-.*\.js$/,
+    ].map((pattern) => candidates.filter(({ fileName }) => pattern.test(fileName)).length);
+    if (legacyCounts.some((count) => count > 0) && legacyCounts.some((count) => count !== 1)) {
+      throw new Error(
+        `fast_mode legacy Windows target set is incomplete: ${legacyCounts.join("/")}`,
+      );
+    }
+    const plan = planFastModePlatform({
+      platform: "win",
+      candidates,
+    });
     if (
-      plans.some(
-        (plan) =>
-          plan.result.status !== "already" ||
-          plan.result.counts.patchable !== 0 ||
-          plan.result.counts.already !== 1,
+      plan.writes.some(
+        (write) =>
+          write.result.status !== "already" ||
+          write.result.counts.patchable !== 0,
       )
     ) throw new Error("Fast mode targets are patchable instead of fully patched");
-    return { files: plans.map((plan) => plan.file).sort() };
+    return { files: uniquePlanFiles(plan.writes) };
   } catch (error) {
     return inspectionFailure(error);
   }
@@ -799,32 +822,35 @@ function inspectFastContract(sources) {
 
 function inspectPluginContract(sources) {
   try {
-    const candidates = sources.filter(({ source, file }) => {
-      const relative = file.replace(/^src\/win\/_asar\//, "");
-      if (!/^(?:\.vite\/build|webview\/assets)\//.test(relative)) return false;
-      return classifyPluginTarget(path.posix.basename(file), source) != null;
-    });
-    const main = candidates.filter(
-      ({ source, file }) => classifyPluginTarget(path.posix.basename(file), source) === "main",
-    );
-    const webview = candidates.filter(
-      ({ source, file }) => classifyPluginTarget(path.posix.basename(file), source) === "webview",
-    );
-    if (main.length !== 1 || webview.length !== 1) {
-      throw new Error(
-        `plugin main/webview expected exactly 1/1 bundle, found ${main.length}/${webview.length}`,
+    const candidates = patchCandidates(
+      sources,
+      [".vite/build", "webview/assets"],
+    ).filter(({ fileName, filePath, source }) => {
+      if (filePath.includes("/.vite/build/")) {
+        return (
+          /^main-.*\.js$/.test(fileName) &&
+          source.includes("externalBrowserUseAllowed") &&
+          source.includes("computerUse")
+        );
+      }
+      return (
+        /^use-is-plugins-enabled-.*\.js$/.test(fileName) ||
+        (source.includes("authMethod") &&
+          source.includes("browser_use_external") &&
+          source.includes("computer_use"))
       );
-    }
-    const result = patchPluginContracts({
-      mainSource: main[0].source,
-      webviewSource: webview[0].source,
     });
+    const plan = planPluginPlatform({
+      platform: "win",
+      candidates,
+    });
+    const [{ matches, result }] = plan.writes;
     if (
       result.status !== "already" ||
       result.main.status !== "already" ||
       result.webview.status !== "already"
     ) throw new Error("plugin targets are patchable instead of fully patched");
-    return { files: [main[0].file, webview[0].file].sort() };
+    return { files: uniquePlanFiles([...matches.main, ...matches.webview]) };
   } catch (error) {
     return inspectionFailure(error);
   }
@@ -832,24 +858,21 @@ function inspectPluginContract(sources) {
 
 function inspectSharedArchiveContract(sources) {
   try {
-    const appMain = requireExactlyOneSource(
-      sources,
-      /\/webview\/assets\/app-main-[^/]+\.js$/,
-      "archive app-main",
+    const candidates = patchCandidates(sources, ["webview/assets"]).filter(
+      ({ source }) =>
+        source.includes("archive-conversation") ||
+        source.includes("delete-archived-conversation") ||
+        source.includes("delete-conversation"),
     );
-    const dataControls = requireExactlyOneSource(
-      sources,
-      /\/webview\/assets\/data-controls-[^/]+\.js$/,
-      "archive data-controls",
-    );
-    const result = patchArchiveContracts({
-      appMainSource: appMain.source,
-      dataControlsSource: dataControls.source,
+    const plan = planArchivePlatform({
+      platform: "win",
+      candidates,
     });
+    const [{ appMain, dataControls, result }] = plan.writes;
     if (!['native', 'already'].includes(result.status)) {
       throw new Error("archive-delete targets are patchable instead of complete");
     }
-    return { files: [appMain.file, dataControls.file].sort() };
+    return { files: uniquePlanFiles([appMain, dataControls]) };
   } catch (error) {
     return inspectionFailure(error);
   }
@@ -857,24 +880,22 @@ function inspectSharedArchiveContract(sources) {
 
 function inspectSidebarContract(sources) {
   try {
-    const threadActions = requireExactlyOneSource(
-      sources,
-      /\/webview\/assets\/thread-actions-[^/]+\.js$/,
-      "sidebar thread-actions",
+    const candidates = patchCandidates(sources, ["webview/assets"]).filter(
+      ({ source }) =>
+        (source.includes("sidebarElectron.archiveThread") &&
+          source.includes("archive-conversation")) ||
+        (source.includes("thread-primary-action") &&
+          source.includes("archive-thread")),
     );
-    const sidebar = requireExactlyOneSource(
-      sources,
-      /\/webview\/assets\/sidebar-flat-sections-[^/]+\.js$/,
-      "sidebar-flat-sections",
-    );
-    const result = patchSidebarContracts({
-      threadActionsSource: threadActions.source,
-      sidebarSource: sidebar.source,
+    const plan = planSidebarPlatform({
+      platform: "win",
+      candidates,
     });
+    const [{ threadActions, sidebar, result }] = plan.writes;
     if (result.status !== "already") {
       throw new Error("sidebar-delete targets are patchable instead of fully patched");
     }
-    return { files: [threadActions.file, sidebar.file].sort() };
+    return { files: uniquePlanFiles([threadActions, sidebar]) };
   } catch (error) {
     return inspectionFailure(error);
   }

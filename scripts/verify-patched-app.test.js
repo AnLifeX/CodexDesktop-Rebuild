@@ -1172,6 +1172,47 @@ test("reports recursive evidence files for every satisfied contract", (t) => {
   ]);
 });
 
+test("accepts Fast, plugin, and sidebar contracts consolidated into app-initial", (t) => {
+  const fixture = createFixture(t);
+  const assetRoot = path.join(fixture.asarRoot, "webview", "assets");
+  const consolidatedNames = [
+    "use-service-tier-settings-fixture.js",
+    "read-service-tier-for-request-fixture.js",
+    "use-is-plugins-enabled-fixture.js",
+    "thread-actions-fixture.js",
+    "sidebar-flat-sections-fixture.js",
+  ];
+  const consolidatedSource = consolidatedNames
+    .map((fileName) => fs.readFileSync(path.join(assetRoot, fileName), "utf8"))
+    .join("\n");
+  for (const fileName of consolidatedNames) {
+    fs.rmSync(path.join(assetRoot, fileName));
+  }
+  writeExact(path.join(assetRoot, "app-initial-current.js"), consolidatedSource);
+
+  const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
+  const consolidatedEvidence =
+    "src/win/_asar/webview/assets/app-initial-current.js";
+  for (const contract of ["fast", "plugin", "sidebar-delete"]) {
+    assert.ok(result.contracts[contract].includes(consolidatedEvidence));
+  }
+});
+
+test("accepts the archive route in a current app-initial bundle", (t) => {
+  const fixture = createFixture(t);
+  const assetRoot = path.join(fixture.asarRoot, "webview", "assets");
+  const oldPath = path.join(assetRoot, "app-main-fixture.js");
+  const currentPath = path.join(assetRoot, "app-initial-archive-current.js");
+  fs.renameSync(oldPath, currentPath);
+
+  const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
+  assert.ok(
+    result.contracts["archive-delete"].includes(
+      "src/win/_asar/webview/assets/app-initial-archive-current.js",
+    ),
+  );
+});
+
 test("combines package mismatch with every unsatisfied contract", (t) => {
   const fixture = createFixture(t, {
     version: "26.707.00000",

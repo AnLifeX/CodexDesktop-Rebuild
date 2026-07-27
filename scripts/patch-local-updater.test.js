@@ -896,6 +896,24 @@ test("patchWebviewMenuBarCode adapts the latest titlebar aliases structurally", 
   assert.strictEqual(patchWebviewMenuBarCode(patched), patched);
 });
 
+test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appends the updater", () => {
+  const source = [
+    "var Ri,Ji,Mi={Root:`root`};",
+    "function Yi(){let[t,n]=(0,Ri.useState)(null),r=`application-menu-content`,i=`no-drag bg-[var(--color-token-menubar-selection-background)]`;return(0,Ji.jsxs)(Mi.Root,{className:`flex items-center gap-0.5 pr-2 pl-1`,children:[(0,Ji.jsx)(`button`,{className:i,children:r}),null]})}",
+    "(0,Ji.jsx)(Yi,{});",
+  ].join("");
+
+  const patched = patchWebviewMenuBarCode(source);
+
+  assert.match(patched, /function codexRebuildUpdaterTitlebar\(\)/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v5/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v5/);
+  const menuRoot = patched.indexOf("children:[(0,Ji.jsx)(`button`,{className:i,children:r}),null");
+  const attachment = patched.indexOf("/* CodexRebuildUpdaterTitlebar:descriptor:start */");
+  assert.ok(menuRoot >= 0 && attachment > menuRoot, "updater must be attached to the modern menu root");
+  assert.strictEqual(patchWebviewMenuBarCode(patched), patched);
+});
+
 test("resolves early-bootstrap to the hashed runtime and patches that backend idempotently", () => {
   assert.equal(typeof resolveRuntimeBootstrap, "function");
   assert.equal(typeof patchBootstrapCode, "function");

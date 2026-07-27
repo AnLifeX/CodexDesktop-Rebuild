@@ -654,7 +654,6 @@ function planFastModePlatform({
   if (platform.startsWith("mac-")) {
     return planMacFastModePlatform({ platform, candidates });
   }
-  const matches = collectFastModeTargetMatches(candidates);
   const namedCandidates = new Map(
     FAST_MODE_CONTRACT_IDS.map((targetId) => [
       targetId,
@@ -665,6 +664,13 @@ function planFastModePlatform({
       ),
     ]),
   );
+  const hasLegacyWindowsSplit = FAST_MODE_CONTRACT_IDS.every(
+    (targetId) => namedCandidates.get(targetId).length === 1,
+  );
+  if (!hasLegacyWindowsSplit) {
+    return planMacFastModePlatform({ platform, candidates });
+  }
+  const matches = collectFastModeTargetMatches(candidates);
   for (const targetId of FAST_MODE_CONTRACT_IDS) {
     if (namedCandidates.get(targetId).length !== matches.get(targetId).length) {
       throw new Error(`fast_mode ${targetId} target set is incomplete for ${platform}`);
@@ -772,14 +778,15 @@ function main() {
     if (!fs.existsSync(assetsDir)) continue;
     for (const f of fs.readdirSync(assetsDir)) {
       const isJavaScript = f.endsWith(".js");
+      if (!isJavaScript) continue;
+      const fp = path.join(assetsDir, f);
+      const src = fs.readFileSync(fp, "utf-8");
       const isNamedWindowsTarget = [...FAST_MODE_FILE_PATTERNS.values()].some(
         (pattern) => pattern.test(f),
       );
-      if (!isJavaScript || (plat === "win" && !isNamedWindowsTarget)) {
+      if (plat === "win" && !isNamedWindowsTarget && !src.includes("fast_mode")) {
         continue;
       }
-      const fp = path.join(assetsDir, f);
-      const src = fs.readFileSync(fp, "utf-8");
       candidates.push({ platform: plat, path: fp, fileName: f, source: src });
     }
   }
