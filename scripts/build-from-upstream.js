@@ -26,6 +26,7 @@ const {
   resolvePrimaryExecutableNameFromManifest,
 } = require("./windows-app-entry");
 const { resolveMacAppBundle } = require("./mac-app-bundle");
+const { normalizeEscapedResourcePaths } = require("./windows-resource-paths");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const SRC_DIR = path.join(PROJECT_ROOT, "src");
@@ -54,6 +55,35 @@ function copyRecursive(src, dest) {
     }
   }
   return count;
+}
+
+function commandExists(command) {
+  try {
+    execFileSync(command, ["--help"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createZip(zipPath, sourceDir) {
+  fs.rmSync(zipPath, { force: true });
+  for (const command of ["7zz", "7z"]) {
+    if (!commandExists(command)) continue;
+    execFileSync(command, ["a", "-tzip", "-mx=5", zipPath, "."], {
+      cwd: sourceDir,
+      stdio: "inherit",
+    });
+    return command;
+  }
+  if (commandExists("tar")) {
+    execFileSync("tar", ["-a", "-c", "-f", zipPath, "."], {
+      cwd: sourceDir,
+      stdio: "inherit",
+    });
+    return "tar";
+  }
+  throw new Error("Windows ZIP creation requires 7zz, 7z, or bsdtar");
 }
 
 // ─── macOS build ────────────────────────────────────────────────
@@ -169,6 +199,13 @@ function buildWin(platform) {
   copyRecursive(appDir, outApp);
 
   const resourcesDir = path.join(outApp, "resources");
+  const normalizedPaths = normalizeEscapedResourcePaths(resourcesDir);
+  if (normalizedPaths.total > 0) {
+    console.log(
+      `   [paths] decoded ${normalizedPaths.total} escaped resource names ` +
+        `(${normalizedPaths.directories} directories, ${normalizedPaths.files} files)`,
+    );
+  }
 
   // Compute old ASAR header hash (before repack)
   const asarPath = path.join(resourcesDir, "app.asar");
@@ -200,10 +237,10 @@ function buildWin(platform) {
   const zipName = `Codex-win-x64-${version}.zip`;
   const zipPath = path.join(OUT_DIR, zipName);
   console.log(`   [zip] ${zipName}`);
-  execSync(`7zz a -tzip -mx=5 "${zipPath}" .`, { cwd: outApp });
+  const zipTool = createZip(zipPath, outApp);
 
   const sizeMB = (fs.statSync(zipPath).size / 1048576).toFixed(1);
-  console.log(`   [ok] ${zipPath} (${sizeMB} MB)`);
+  console.log(`   [ok] ${zipPath} (${sizeMB} MB via ${zipTool})`);
 }
 
 // ─── ASAR integrity ─────────────────────────────────────────────
