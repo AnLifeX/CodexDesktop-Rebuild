@@ -83,6 +83,10 @@ jobs:
           if ($basePackages[0].Name -eq $targetPackages[0].Name) {
             throw "Base and target packages must have different versions: $($basePackages[0].Name)"
           }
+          if ($targetPackages[0].Name -notmatch "^(?<id>.+)-(?<version>\d+\.\d+\.\d+(?:-r\d+)?)-full\.nupkg$") {
+            throw "Cannot derive a raw NuGet input name from $($targetPackages[0].Name)"
+          }
+          $targetRawName = "$($Matches.id).$($Matches.version).nupkg"
 
           $releaseDir = "C:\d"
           $targetDir = "C:\i"
@@ -98,7 +102,10 @@ jobs:
 
           Copy-Item -LiteralPath $basePackages[0].FullName -Destination (Join-Path $releaseDir $basePackages[0].Name)
           Copy-Item -LiteralPath $baseIndexes[0].FullName -Destination (Join-Path $releaseDir "RELEASES")
-          $targetInput = Join-Path $targetDir $targetPackages[0].Name
+          # A *-full.nupkg filename tells Squirrel the package is already
+          # releasified, causing it to skip RELEASES and delta generation.
+          # Use the raw NuGet naming convention to force the real code path.
+          $targetInput = Join-Path $targetDir $targetRawName
           Copy-Item -LiteralPath $targetPackages[0].FullName -Destination $targetInput
 
           $squirrel = Join-Path $env:RUNNER_TEMP "delta-tools/node_modules/electron-winstaller/vendor/Squirrel.exe"
@@ -112,6 +119,7 @@ jobs:
           "TMP=$tempDir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Write-Host "Base:   $($basePackages[0].Name) ($($basePackages[0].Length) bytes)"
           Write-Host "Target: $($targetPackages[0].Name) ($($targetPackages[0].Length) bytes)"
+          Write-Host "Raw target input: $targetInput"
 
       - name: Generate delta package
         id: generate_delta

@@ -272,6 +272,8 @@ test("manual delta test reuses artifacts without publishing and has a 30 minute 
   assert.match(delta, /timeout-minutes: 30/);
   assert.match(delta, /SQUIRREL_EXE/);
   assert.match(delta, /--releasify/);
+  assert.match(workflow, /targetRawName/);
+  assert.match(workflow, /raw NuGet naming convention/);
   assert.match(workflow, /uses: actions\/upload-artifact@v7/);
   assert.match(workflow, /retention-days: 7/);
   assert.doesNotMatch(workflow, /gh release|softprops\/action-gh-release|WINDOWS_UPDATE_FEED/i);
