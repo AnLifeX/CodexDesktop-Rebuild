@@ -17,6 +17,7 @@ const PROJECT_ROOT = path.join(__dirname, "..");
 
 const PATCHES = [
   "patch-i18n.js",
+  "patch-zh-cn-catalog.js",
   "patch-native-menu-i18n.js",
   "patch-copyright.js",
   "patch-devtools.js",

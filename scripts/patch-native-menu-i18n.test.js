@@ -57,7 +57,9 @@ const { COMMAND_TITLE_TRANSLATIONS, locateTargets, patchSource } = loadPatchModu
   });
   const sources = commandTargets.map((target) => fs.readFileSync(target.path, "utf8"));
 
-  assert.strictEqual(commandTargets.length, 3);
+  // Upstream freely splits or consolidates these generated chunks. Verify the
+  // message contracts below instead of pinning one release's bundle count.
+  assert.ok(commandTargets.length > 0);
   assert.ok(sources.some((source) => source.includes("menuTitleIntlId")));
   assert.ok(sources.some((source) => source.includes("codex.commandDescription.")));
   const sourceCatalog = sources.join("\n");
