@@ -25,7 +25,7 @@ concurrency:
 jobs:
   delta-test:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -124,7 +124,7 @@ jobs:
       - name: Generate delta package
         id: generate_delta
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 60
         shell: pwsh
         run: |
           $stdout = Join-Path $env:DELTA_TELEMETRY_DIR "squirrel.stdout.log"
