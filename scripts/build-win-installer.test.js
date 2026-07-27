@@ -254,6 +254,29 @@ test("Windows workflows guarantee full installers and bound optional delta gener
   assertFullFirstWindowsInstallerWorkflow(syncWorkflow, { supportsSkip: false });
 });
 
+test("manual delta test reuses artifacts without publishing and has a 30 minute limit", () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, "..", ".github", "workflows", "windows-delta-test.yml"),
+    "utf-8",
+  ).replace(/\r\n/g, "\n");
+
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /base_run_id:/);
+  assert.match(workflow, /target_run_id:/);
+  assert.match(workflow, /uses: actions\/download-artifact@v7/);
+  assert.match(workflow, /run-id: \$\{\{ inputs\.base_run_id \}\}/);
+  assert.match(workflow, /run-id: \$\{\{ inputs\.target_run_id \}\}/);
+  const delta = namedWorkflowStep(workflow, "Generate delta package");
+  assert.ok(delta, "delta-only workflow should have a bounded generation step");
+  assert.match(delta, /continue-on-error: true/);
+  assert.match(delta, /timeout-minutes: 30/);
+  assert.match(delta, /SQUIRREL_EXE/);
+  assert.match(delta, /--releasify/);
+  assert.match(workflow, /uses: actions\/upload-artifact@v7/);
+  assert.match(workflow, /retention-days: 7/);
+  assert.doesNotMatch(workflow, /gh release|softprops\/action-gh-release|WINDOWS_UPDATE_FEED/i);
+});
+
 test("manual Windows workflow can explicitly replace the same release version", () => {
   const workflow = fs.readFileSync(
     path.join(__dirname, "..", ".github", "workflows", "build.yml"),

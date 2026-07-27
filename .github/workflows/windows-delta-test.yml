@@ -1,0 +1,262 @@
+name: Windows Delta Artifact Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_run_id:
+        description: "Run ID containing the previous Codex-Windows-UpdateFeed-x64 artifact"
+        required: true
+        default: "29911650841"
+        type: string
+      target_run_id:
+        description: "Run ID containing the target Codex-Windows-UpdateFeed-x64 artifact"
+        required: true
+        default: "30263323260"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: windows-delta-artifact-test
+  cancel-in-progress: false
+
+jobs:
+  delta-test:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install the pinned Squirrel toolchain
+        shell: pwsh
+        run: |
+          $toolRoot = Join-Path $env:RUNNER_TEMP "delta-tools"
+          npm install --prefix $toolRoot --no-save --no-package-lock electron-winstaller@5.4.0
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install electron-winstaller 5.4.0"
+          }
+          $squirrel = Join-Path $toolRoot "node_modules/electron-winstaller/vendor/Squirrel.exe"
+          if (-not (Test-Path -LiteralPath $squirrel -PathType Leaf)) {
+            throw "Squirrel.exe is missing after toolchain installation: $squirrel"
+          }
+          Write-Host "Using $squirrel"
+
+      - name: Download base Windows update feed artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: Codex-Windows-UpdateFeed-x64
+          path: ${{ runner.temp }}/delta-inputs/base
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.base_run_id }}
+
+      - name: Download target Windows update feed artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: Codex-Windows-UpdateFeed-x64
+          path: ${{ runner.temp }}/delta-inputs/target
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.target_run_id }}
+
+      - name: Stage short delta paths
+        shell: pwsh
+        run: |
+          $inputRoot = Join-Path $env:RUNNER_TEMP "delta-inputs"
+          $basePackages = @(Get-ChildItem -LiteralPath (Join-Path $inputRoot "base") -Filter "*-full.nupkg" -File -Recurse)
+          $targetPackages = @(Get-ChildItem -LiteralPath (Join-Path $inputRoot "target") -Filter "*-full.nupkg" -File -Recurse)
+          $baseIndexes = @(Get-ChildItem -LiteralPath (Join-Path $inputRoot "base") -Filter "RELEASES" -File -Recurse)
+          if ($basePackages.Count -ne 1) {
+            throw "Expected exactly one base full nupkg, found $($basePackages.Count)"
+          }
+          if ($targetPackages.Count -ne 1) {
+            throw "Expected exactly one target full nupkg, found $($targetPackages.Count)"
+          }
+          if ($baseIndexes.Count -ne 1) {
+            throw "Expected exactly one base RELEASES file, found $($baseIndexes.Count)"
+          }
+          if ($basePackages[0].Name -eq $targetPackages[0].Name) {
+            throw "Base and target packages must have different versions: $($basePackages[0].Name)"
+          }
+
+          $releaseDir = "C:\d"
+          $targetDir = "C:\i"
+          $tempDir = "C:\t"
+          $telemetryDir = "C:\m"
+          $artifactDir = "C:\a"
+          foreach ($dir in @($releaseDir, $targetDir, $tempDir, $telemetryDir, $artifactDir)) {
+            if (Test-Path -LiteralPath $dir) {
+              throw "Refusing to reuse unexpected short-path directory: $dir"
+            }
+            New-Item -ItemType Directory -Path $dir | Out-Null
+          }
+
+          Copy-Item -LiteralPath $basePackages[0].FullName -Destination (Join-Path $releaseDir $basePackages[0].Name)
+          Copy-Item -LiteralPath $baseIndexes[0].FullName -Destination (Join-Path $releaseDir "RELEASES")
+          $targetInput = Join-Path $targetDir $targetPackages[0].Name
+          Copy-Item -LiteralPath $targetPackages[0].FullName -Destination $targetInput
+
+          $squirrel = Join-Path $env:RUNNER_TEMP "delta-tools/node_modules/electron-winstaller/vendor/Squirrel.exe"
+          "DELTA_RELEASE_DIR=$releaseDir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "DELTA_INPUT_NUPKG=$targetInput" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "DELTA_EXPECTED_FILE=$($targetPackages[0].Name -replace '-full\.nupkg$', '-delta.nupkg')" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "DELTA_TELEMETRY_DIR=$telemetryDir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "DELTA_ARTIFACT_DIR=$artifactDir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SQUIRREL_EXE=$squirrel" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "TEMP=$tempDir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "TMP=$tempDir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "Base:   $($basePackages[0].Name) ($($basePackages[0].Length) bytes)"
+          Write-Host "Target: $($targetPackages[0].Name) ($($targetPackages[0].Length) bytes)"
+
+      - name: Generate delta package
+        id: generate_delta
+        continue-on-error: true
+        timeout-minutes: 30
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:DELTA_TELEMETRY_DIR "squirrel.stdout.log"
+          $stderr = Join-Path $env:DELTA_TELEMETRY_DIR "squirrel.stderr.log"
+          $telemetry = Join-Path $env:DELTA_TELEMETRY_DIR "telemetry.jsonl"
+          $summary = Join-Path $env:DELTA_TELEMETRY_DIR "summary.txt"
+          $arguments = @(
+            "--releasify", $env:DELTA_INPUT_NUPKG,
+            "--releaseDir", $env:DELTA_RELEASE_DIR,
+            "--no-msi"
+          )
+
+          Get-ChildItem -LiteralPath (Split-Path -Parent $env:SQUIRREL_EXE) -Filter "Squirrel-*.log" -File -ErrorAction SilentlyContinue |
+            Remove-Item -Force
+
+          $startedAt = Get-Date
+          $watch = [System.Diagnostics.Stopwatch]::StartNew()
+          $process = Start-Process -FilePath $env:SQUIRREL_EXE -ArgumentList $arguments -WorkingDirectory $env:DELTA_RELEASE_DIR -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $peakWorkingSet = [int64]0
+          $peakPrivateMemory = [int64]0
+          $peakProcessCount = 0
+          Write-Host "Started Squirrel PID $($process.Id) at $($startedAt.ToUniversalTime().ToString('o'))"
+
+          while (-not $process.HasExited) {
+            $allProcesses = @(Get-CimInstance Win32_Process)
+            $trackedIds = [System.Collections.Generic.HashSet[int]]::new()
+            [void]$trackedIds.Add([int]$process.Id)
+            do {
+              $added = $false
+              foreach ($entry in $allProcesses) {
+                if ($trackedIds.Contains([int]$entry.ParentProcessId) -and $trackedIds.Add([int]$entry.ProcessId)) {
+                  $added = $true
+                }
+              }
+            } while ($added)
+
+            $tracked = @($trackedIds | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+            $workingSet = [int64](($tracked | Measure-Object -Property WorkingSet64 -Sum).Sum)
+            $privateMemory = [int64](($tracked | Measure-Object -Property PrivateMemorySize64 -Sum).Sum)
+            $cpuSeconds = [double](($tracked | Measure-Object -Property CPU -Sum).Sum)
+            $peakWorkingSet = [Math]::Max($peakWorkingSet, $workingSet)
+            $peakPrivateMemory = [Math]::Max($peakPrivateMemory, $privateMemory)
+            $peakProcessCount = [Math]::Max($peakProcessCount, $tracked.Count)
+            $drive = Get-PSDrive -Name C
+            $releaseFiles = @(Get-ChildItem -LiteralPath $env:DELTA_RELEASE_DIR -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { "$($_.Name):$($_.Length)" })
+            $sample = [ordered]@{
+              timestamp_utc = (Get-Date).ToUniversalTime().ToString("o")
+              elapsed_seconds = [Math]::Round($watch.Elapsed.TotalSeconds, 1)
+              process_count = $tracked.Count
+              cpu_seconds = [Math]::Round($cpuSeconds, 1)
+              working_set_bytes = $workingSet
+              private_memory_bytes = $privateMemory
+              disk_free_bytes = [int64]$drive.Free
+              files = $releaseFiles
+            }
+            $sample | ConvertTo-Json -Compress | Add-Content -LiteralPath $telemetry -Encoding utf8
+            Write-Host ("elapsed={0:n1}s processes={1} cpu={2:n1}s working_set={3:n1}MiB private={4:n1}MiB disk_free={5:n1}GiB" -f $watch.Elapsed.TotalSeconds, $tracked.Count, $cpuSeconds, ($workingSet / 1MB), ($privateMemory / 1MB), ($drive.Free / 1GB))
+            [void]$process.WaitForExit(30000)
+            $process.Refresh()
+          }
+
+          $process.WaitForExit()
+          $watch.Stop()
+          @(
+            "started_utc=$($startedAt.ToUniversalTime().ToString('o'))"
+            "duration_seconds=$([Math]::Round($watch.Elapsed.TotalSeconds, 1))"
+            "exit_code=$($process.ExitCode)"
+            "peak_process_count=$peakProcessCount"
+            "peak_working_set_bytes=$peakWorkingSet"
+            "peak_private_memory_bytes=$peakPrivateMemory"
+          ) | Set-Content -LiteralPath $summary -Encoding utf8
+          Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
+          Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "[stderr] $_" }
+          Get-Content -LiteralPath $summary
+          if ($process.ExitCode -ne 0) {
+            throw "Squirrel exited with code $($process.ExitCode)"
+          }
+
+      - name: Collect delta test evidence
+        if: always()
+        shell: pwsh
+        env:
+          DELTA_OUTCOME: ${{ steps.generate_delta.outcome }}
+        run: |
+          New-Item -ItemType Directory -Path $env:DELTA_ARTIFACT_DIR -Force | Out-Null
+          if (Test-Path -LiteralPath $env:DELTA_TELEMETRY_DIR -PathType Container) {
+            Get-ChildItem -LiteralPath $env:DELTA_TELEMETRY_DIR -File -ErrorAction SilentlyContinue |
+              Copy-Item -Destination $env:DELTA_ARTIFACT_DIR -Force
+          }
+          if (Test-Path -LiteralPath $env:DELTA_RELEASE_DIR -PathType Container) {
+            Get-ChildItem -LiteralPath $env:DELTA_RELEASE_DIR -File |
+              Where-Object { $_.Name -eq "RELEASES" -or $_.Name -like "*-delta.nupkg" -or $_.Extension -eq ".log" } |
+              Copy-Item -Destination $env:DELTA_ARTIFACT_DIR -Force
+            Get-ChildItem -LiteralPath $env:DELTA_RELEASE_DIR -File |
+              Sort-Object Name |
+              ForEach-Object { "$($_.Name)`t$($_.Length)" } |
+              Set-Content -LiteralPath (Join-Path $env:DELTA_ARTIFACT_DIR "release-files.tsv") -Encoding utf8
+          }
+          Get-ChildItem -LiteralPath (Split-Path -Parent $env:SQUIRREL_EXE) -Filter "Squirrel-*.log" -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $env:DELTA_ARTIFACT_DIR -Force
+          "delta_step_outcome=$env:DELTA_OUTCOME" | Set-Content -LiteralPath (Join-Path $env:DELTA_ARTIFACT_DIR "workflow-outcome.txt") -Encoding utf8
+          Get-ChildItem -LiteralPath $env:DELTA_ARTIFACT_DIR -File | Sort-Object Name | ForEach-Object { Write-Host "$($_.Name) ($($_.Length) bytes)" }
+
+      - name: Upload delta test artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Windows-delta-test-${{ inputs.base_run_id }}-${{ inputs.target_run_id }}
+          path: C:/a/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Verify usable delta output
+        if: always()
+        shell: pwsh
+        env:
+          DELTA_OUTCOME: ${{ steps.generate_delta.outcome }}
+        run: |
+          if ($env:DELTA_OUTCOME -ne "success") {
+            throw "Delta generation step ended with outcome '$env:DELTA_OUTCOME'; see the uploaded telemetry artifact"
+          }
+          $expected = Join-Path $env:DELTA_RELEASE_DIR $env:DELTA_EXPECTED_FILE
+          if (-not (Test-Path -LiteralPath $expected -PathType Leaf)) {
+            throw "Expected delta package was not generated: $expected"
+          }
+          $releaseIndex = Join-Path $env:DELTA_RELEASE_DIR "RELEASES"
+          if (-not (Test-Path -LiteralPath $releaseIndex -PathType Leaf)) {
+            throw "Squirrel did not produce a RELEASES index"
+          }
+          $referenced = Get-Content -LiteralPath $releaseIndex | ForEach-Object { ($_ -split '\s+')[1] }
+          if ($env:DELTA_EXPECTED_FILE -notin $referenced) {
+            throw "RELEASES does not reference $($env:DELTA_EXPECTED_FILE)"
+          }
+          $delta = Get-Item -LiteralPath $expected
+          @(
+            "## Windows delta test passed"
+            ""
+            "- Base run: ${{ inputs.base_run_id }}"
+            "- Target run: ${{ inputs.target_run_id }}"
+            "- Delta: $($delta.Name) ($($delta.Length) bytes)"
+            "- Publication: none (Actions artifact only)"
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
