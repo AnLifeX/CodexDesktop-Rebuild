@@ -23,6 +23,7 @@ const PATCHES = [
   "patch-fast-mode.js",
   "patch-plugin-auth.js",
   "patch-windows-native-paths.js",
+  "patch-computer-use-win10.js",
   "patch-updater.js",
   "patch-local-updater.js",
   "patch-archive-delete.js",
