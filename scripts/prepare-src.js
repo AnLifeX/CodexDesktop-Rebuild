@@ -26,6 +26,7 @@ const {
   WINDOWS_SHORT_UNPACKED_NATIVE_FILES,
   toNativePath,
 } = require("./windows-native-relocation");
+const { decodeEscapedResourceName } = require("./windows-resource-paths");
 
 const SRC = path.join(__dirname, "..", "src");
 const PROJECT_ROOT = path.join(__dirname, "..");
@@ -85,10 +86,6 @@ function ensureWindowsExtraResources(sourceDir) {
   }
 }
 
-function decodedUnpackedSegment(name) {
-  return name.replace(/%40/gi, "@");
-}
-
 function copyUnpackedFilesIntoAsarSource(sourceDir, asarContentDir) {
   const unpackedDir = path.join(sourceDir, "app.asar.unpacked");
   if (!fs.existsSync(unpackedDir)) return 0;
@@ -97,7 +94,7 @@ function copyUnpackedFilesIntoAsarSource(sourceDir, asarContentDir) {
   const visit = (srcDir, relativeDir = "") => {
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
       const srcPath = path.join(srcDir, entry.name);
-      const decodedName = decodedUnpackedSegment(entry.name);
+      const decodedName = decodeEscapedResourceName(entry.name);
       const relativePath = relativeDir ? path.join(relativeDir, decodedName) : decodedName;
       const destPath = path.join(asarContentDir, relativePath);
 

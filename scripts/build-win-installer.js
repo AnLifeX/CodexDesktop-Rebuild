@@ -17,6 +17,7 @@ const {
   getPreparedWindowsMsixVersion,
   resolvePrimaryExecutableNameFromManifest,
 } = require("./windows-app-entry");
+const { normalizeEscapedResourcePaths } = require("./windows-resource-paths");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const INITIAL_TMPDIR = os.tmpdir();
@@ -80,31 +81,6 @@ function resetMarkedDirectory(dir, markerName) {
   }
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(marker, "CodexDesktop-Rebuild Windows installer output\n", "utf-8");
-}
-
-function normalizeEscapedScopeDirs(rootDir) {
-  if (!fs.existsSync(rootDir)) return 0;
-  let renamed = 0;
-
-  const visit = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-
-      const oldPath = path.join(dir, entry.name);
-      let nextPath = oldPath;
-      if (entry.name.startsWith("%40")) {
-        nextPath = path.join(dir, `@${entry.name.slice(3)}`);
-        if (!fs.existsSync(nextPath)) {
-          fs.renameSync(oldPath, nextPath);
-          renamed++;
-        }
-      }
-      visit(nextPath);
-    }
-  };
-
-  visit(rootDir);
-  return renamed;
 }
 
 function computeAsarHeaderHash(asarPath) {
@@ -196,9 +172,12 @@ function applyPatchedResources(appDirectory, primaryExe) {
     }
   }
 
-  const normalizedScopes = normalizeEscapedScopeDirs(destUnpacked);
-  if (normalizedScopes > 0) {
-    console.log(`-- normalized ${normalizedScopes} escaped scope directories in app.asar.unpacked`);
+  const normalizedPaths = normalizeEscapedResourcePaths(resourcesDir);
+  if (normalizedPaths.total > 0) {
+    console.log(
+      `-- decoded ${normalizedPaths.total} escaped resource names ` +
+        `(${normalizedPaths.directories} directories, ${normalizedPaths.files} files)`,
+    );
   }
 
   const newHash = computeAsarHeaderHash(destAsar);

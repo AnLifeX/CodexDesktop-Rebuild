@@ -27,6 +27,7 @@ const {
   readWindowsInternalAppVersionFromRemoteMsix,
   validateWindowsInternalAppVersion,
 } = require("./windows-msix-internal-version");
+const { normalizeEscapedResourcePaths } = require("./windows-resource-paths");
 
 // TLS certs for MS delivery CDN
 const certsDir = path.join(__dirname, "certs");
@@ -348,6 +349,16 @@ async function assembleOutput(resourcesDir, destDir, label) {
     else if (!e.isSymbolicLink()) { fs.copyFileSync(s, d); extraCount++; }
   }
   console.log(`   [copy] ${extraCount} extra resource files`);
+
+  if (label === "Windows") {
+    const normalized = normalizeEscapedResourcePaths(destDir);
+    if (normalized.total > 0) {
+      console.log(
+        `   [paths] decoded ${normalized.total} escaped resource names ` +
+          `(${normalized.directories} directories, ${normalized.files} files)`,
+      );
+    }
+  }
 
   const total = countFiles(destDir);
   console.log(`   [ok] ${total} files total`);
