@@ -73,6 +73,12 @@ function withLegacyComponentMouseLeave(code) {
   );
 }
 
+function withoutDeleteStart(code, startCall = "ne()") {
+  const lifecycle = `onDeleteStart:()=>{${startCall}},`;
+  assert.ok(code.includes(lifecycle), "current sidebar delete must include its lifecycle start hook");
+  return code.replace(lifecycle, "");
+}
+
 test("patches task-worded thread actions with the active delete route idempotently", () => {
   assert.equal(typeof patchThreadActionsSource, "function");
   const first = patchThreadActionsSource(LATEST_THREAD_ACTIONS);
@@ -123,6 +129,7 @@ test("adds delete and inline-confirmation actions to the latest sidebar aliases 
   assert.match(first.code, /id:`delete-thread`/);
   assert.match(first.code, /deleteAction:\{confirming:CodexDeleteConfirm/);
   assert.match(first.code, /additionalHoverActionCount:\(Me\?1:0\)\+1/);
+  assert.match(first.code, /onDeleteStart:\(\)=>\{ne\(\)\}/);
   const deleteAction = actionSource(first.code, "thread-delete-action", "onRequest");
   assert.match(deleteAction, /ariaLabel:i\.formatMessage\(Sr\.deleteThread\)/);
   assert.match(deleteAction, /icon:\(0,Fc\.jsx\)\(`svg`,/);
@@ -152,6 +159,20 @@ test("adds delete and inline-confirmation actions to the latest sidebar aliases 
       ),
     /sidebar hover\/row marker postcondition is malformed|sidebar hover.*expected exactly 1.*found 2/i,
   );
+});
+
+test("starts the row removal lifecycle before deleting and migrates the stale-row contract", () => {
+  const current = patchSidebarSource(LATEST_SIDEBAR).code;
+  const legacy = withoutDeleteStart(current);
+  const migrated = patchSidebarSource(legacy);
+  assert.equal(migrated.status, "patched");
+  assert.match(migrated.code, /onDeleteStart:\(\)=>\{ne\(\)\}/);
+  assert.equal(patchSidebarSource(migrated.code).status, "already");
+
+  const activeAware = LATEST_SIDEBAR.replace("ne(),F({", "ne(b===!0),F({");
+  assert.notEqual(activeAware, LATEST_SIDEBAR);
+  const activeAwarePatched = patchSidebarSource(activeAware);
+  assert.match(activeAwarePatched.code, /onDeleteStart:\(\)=>\{ne\(b===!0\)\}/);
 });
 
 test("migrates the previous text delete action to the icon contract idempotently", () => {
