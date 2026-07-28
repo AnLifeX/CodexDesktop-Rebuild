@@ -951,10 +951,62 @@ function analyzeHoverFunction(code, node) {
   };
 }
 
+function sidebarArchiveHandlers(code, node) {
+  const handlers = [];
+  walk(node, (inner) => {
+    if (
+      inner.type === "VariableDeclarator" &&
+      (inner.init?.type === "ArrowFunctionExpression" || inner.init?.type === "FunctionExpression") &&
+      sourceFor(code, inner.init).includes("sidebar_context_menu")
+    ) handlers.push({ start: inner.start, end: inner.end, init: inner.init });
+    if (
+      inner.type === "AssignmentExpression" &&
+      inner.operator === "=" &&
+      inner.left.type === "Identifier" &&
+      (inner.right?.type === "ArrowFunctionExpression" || inner.right?.type === "FunctionExpression") &&
+      sourceFor(code, inner.right).includes("sidebar_context_menu")
+    ) handlers.push({ start: inner.start, end: inner.end, init: inner.right });
+  });
+  return handlers;
+}
+
+function analyzeArchiveHandlerLifecycle(code, handler) {
+  const archiveCalls = [];
+  walkOwnExecutableBody(handler.init.body, (inner) => {
+    if (inner.type !== "CallExpression") return;
+    const options = inner.arguments.find(
+      (argument) =>
+        argument?.type === "ObjectExpression" &&
+        argument.properties.some((property) => propertyName(property) === "conversationId"),
+    );
+    if (options) archiveCalls.push({ call: inner, options });
+  });
+  if (archiveCalls.length !== 1) throw new Error("sidebar archive handler call is ambiguous");
+  const archiveCall = archiveCalls[0];
+  const startCalls = [];
+  walkOwnExecutableBody(handler.init.body, (inner) => {
+    if (
+      inner.type === "CallExpression" &&
+      inner !== archiveCall.call &&
+      inner.end <= archiveCall.call.start
+    ) startCalls.push(inner);
+  });
+  if (startCalls.length !== 1) {
+    throw new Error(
+      `sidebar archive lifecycle expected exactly 1 start call, found ${startCalls.length}`,
+    );
+  }
+  return {
+    ...archiveCall,
+    startCall: startCalls[0],
+    start: sourceFor(code, startCalls[0]),
+  };
+}
+
 function analyzeRowFunction(code, node, hoverFunctionName) {
   const hookPatterns = [];
   const stateDeclarations = [];
-  const archiveHandlers = [];
+  const archiveHandlers = sidebarArchiveHandlers(code, node);
   const archiveItems = [];
   const hoverRenders = [];
   const hoverCounts = [];
@@ -969,18 +1021,6 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
       inner.id.type === "ArrayPattern" &&
       sequenceMemberAlias(inner.init, "useState")
     ) stateDeclarations.push(inner);
-    if (
-      inner.type === "VariableDeclarator" &&
-      (inner.init?.type === "ArrowFunctionExpression" || inner.init?.type === "FunctionExpression") &&
-      sourceFor(code, inner.init).includes("sidebar_context_menu")
-    ) archiveHandlers.push({ start: inner.start, end: inner.end, init: inner.init });
-    if (
-      inner.type === "AssignmentExpression" &&
-      inner.operator === "=" &&
-      inner.left.type === "Identifier" &&
-      (inner.right?.type === "ArrowFunctionExpression" || inner.right?.type === "FunctionExpression") &&
-      sourceFor(code, inner.right).includes("sidebar_context_menu")
-    ) archiveHandlers.push({ start: inner.start, end: inner.end, init: inner.right });
     if (inner.type === "ObjectExpression") {
       const id = inner.properties.find((property) => propertyName(property) === "id");
       if (literalValue(id?.value) === "archive-thread") archiveItems.push(inner);
@@ -1036,18 +1076,8 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     callbackCacheTest = cacheConditions[0];
   }
   const handler = archiveHandlers[0];
-  const archiveCall = [];
-  walk(handler.init, (inner) => {
-    if (inner.type !== "CallExpression") return;
-    const options = inner.arguments.find(
-      (argument) =>
-        argument?.type === "ObjectExpression" &&
-        argument.properties.some((property) => propertyName(property) === "conversationId"),
-    );
-    if (options) archiveCall.push({ call: inner, options });
-  });
-  if (archiveCall.length !== 1) throw new Error("sidebar archive handler call is ambiguous");
-  const archiveArgs = archiveCall[0].options;
+  const archiveLifecycle = analyzeArchiveHandlerLifecycle(code, handler);
+  const archiveArgs = archiveLifecycle.options;
   const valueFor = (name) => {
     const property = archiveArgs.properties.find((item) => propertyName(item) === name);
     if (!property) throw new Error(`sidebar archive handler ${name} is missing`);
@@ -1070,6 +1100,7 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     hoverCount: hoverCounts[0],
     conversationId: valueFor("conversationId"),
     hostId: valueFor("hostId"),
+    start: archiveLifecycle.start,
     success: valueFor("onArchiveSuccess"),
     error: valueFor("onArchiveError"),
   };
@@ -1354,10 +1385,27 @@ function inspectSidebarPostcondition(code) {
     call.arguments[0]?.type === "ObjectExpression" &&
     ["conversationId", "hostId"].every((name) => objectProperty(call.arguments[0], name)),
   );
+  const archiveHandlers = sidebarArchiveHandlers(code, rowFunction);
+  if (archiveHandlers.length !== 1) {
+    throw new Error("sidebar row archive lifecycle owner is ambiguous");
+  }
+  const archiveLifecycle = analyzeArchiveHandlerLifecycle(code, archiveHandlers[0]);
+  const deleteOptions = confirmCalls[0]?.arguments[0];
+  const deleteStartProperties = objectProperties(deleteOptions, "onDeleteStart");
+  const deleteStart = deleteStartProperties[0]?.value;
+  const deleteStartCalls = [];
+  if (isFunctionNode(deleteStart)) {
+    walkOwnExecutableBody(deleteStart.body, (node) => {
+      if (node.type === "CallExpression") deleteStartCalls.push(node);
+    });
+  }
   if (
     callToIdentifier(requestDelete, "CodexSetDeleteConfirm", (call) => sourceFor(code, call.arguments[0]) === "!0").length !== 1 ||
     callToIdentifier(confirmDelete, "CodexSetDeleteConfirm", (call) => sourceFor(code, call.arguments[0]) === "!1").length !== 1 ||
-    confirmCalls.length !== 1
+    confirmCalls.length !== 1 ||
+    deleteStartProperties.length !== 1 ||
+    deleteStartCalls.length !== 1 ||
+    sourceFor(code, deleteStartCalls[0]) !== archiveLifecycle.start
   ) throw new Error("sidebar row request/confirm/reset handlers are not wired");
   return { status: "already" };
 }
@@ -1501,6 +1549,62 @@ function migrateSidebarMouseLeave(code) {
   };
 }
 
+function migrateSidebarDeleteLifecycle(code) {
+  const { ast, comments } = parseSidebarDocument(code, "sidebar lifecycle migration");
+  const rowComments = exactSidebarComments(comments, "CodexSidebarDeleteRow");
+  const functions = [];
+  walk(ast, (node) => {
+    if (node.type === "FunctionDeclaration") functions.push(node);
+  });
+  if (rowComments.length !== 1) {
+    throw new Error("sidebar lifecycle migration row marker is malformed");
+  }
+  const rowFunctions = functions.filter(
+    (fn) => fn.body.start < rowComments[0].start && fn.body.end > rowComments[0].end,
+  );
+  if (rowFunctions.length !== 1) {
+    throw new Error("sidebar lifecycle migration row owner is ambiguous");
+  }
+  const rowFunction = rowFunctions[0];
+  const archiveHandlers = sidebarArchiveHandlers(code, rowFunction);
+  if (archiveHandlers.length !== 1) {
+    throw new Error("sidebar lifecycle migration archive handler is ambiguous");
+  }
+  const archiveLifecycle = analyzeArchiveHandlerLifecycle(code, archiveHandlers[0]);
+  const confirmDeletes = [];
+  walk(rowFunction, (node) => {
+    if (
+      node.type === "VariableDeclarator" &&
+      node.id.type === "Identifier" &&
+      node.id.name === "CodexConfirmDelete"
+    ) confirmDeletes.push(node.init);
+  });
+  if (confirmDeletes.length !== 1) {
+    throw new Error("sidebar lifecycle migration confirm handler is ambiguous");
+  }
+  const deleteCalls = callToIdentifier(confirmDeletes[0], "CodexDeleteThread", (call) =>
+    call.arguments[0]?.type === "ObjectExpression" &&
+    ["conversationId", "hostId"].every((name) => objectProperty(call.arguments[0], name)),
+  );
+  if (deleteCalls.length !== 1) {
+    throw new Error("sidebar lifecycle migration delete call is ambiguous");
+  }
+  const options = deleteCalls[0].arguments[0];
+  const startProperties = objectProperties(options, "onDeleteStart");
+  if (startProperties.length > 1) {
+    throw new Error("sidebar lifecycle migration found duplicate start hooks");
+  }
+  if (startProperties.length === 1) return { code, changed: false };
+  return {
+    code: applySourceReplacements(code, [{
+      start: options.start + 1,
+      end: options.start + 1,
+      text: `onDeleteStart:()=>{${archiveLifecycle.start}},`,
+    }]),
+    changed: true,
+  };
+}
+
 function patchSidebarSource(code) {
   const hoverMarker = "/* CodexSidebarDeleteHover */";
   const rowMarker = "/* CodexSidebarDeleteRow */";
@@ -1509,14 +1613,16 @@ function patchSidebarSource(code) {
   if (hoverCount > 0 || rowCount > 0) {
     const iconMigration = migrateSidebarDeleteIcon(code);
     const mouseLeaveMigration = migrateSidebarMouseLeave(iconMigration.code);
-    const changed = iconMigration.changed || mouseLeaveMigration.changed;
-    inspectSidebarPostcondition(mouseLeaveMigration.code);
+    const lifecycleMigration = migrateSidebarDeleteLifecycle(mouseLeaveMigration.code);
+    const rowChanged = mouseLeaveMigration.changed || lifecycleMigration.changed;
+    const changed = iconMigration.changed || rowChanged;
+    inspectSidebarPostcondition(lifecycleMigration.code);
     return {
-      code: mouseLeaveMigration.code,
+      code: lifecycleMigration.code,
       status: changed ? "patched" : "already",
       counts: {
         hover: sidebarCount(iconMigration.changed ? 1 : 0, iconMigration.changed ? 0 : 1, "sidebar hover"),
-        row: sidebarCount(mouseLeaveMigration.changed ? 1 : 0, mouseLeaveMigration.changed ? 0 : 1, "sidebar row"),
+        row: sidebarCount(rowChanged ? 1 : 0, rowChanged ? 0 : 1, "sidebar row"),
       },
     };
   }
@@ -1571,7 +1677,7 @@ function patchSidebarSource(code) {
   const stateInit = sourceFor(code, row.stateDeclaration.init);
   const handlers =
     `let CodexRequestDelete=()=>{CodexSetDeleteConfirm(!0)},CodexConfirmDelete=()=>{CodexSetDeleteConfirm(!1),` +
-    `CodexDeleteThread({conversationId:${row.conversationId},hostId:${row.hostId},onDeleteSuccess:${row.success},onDeleteError:${row.error}})};`;
+    `CodexDeleteThread({conversationId:${row.conversationId},hostId:${row.hostId},onDeleteStart:()=>{${row.start}},onDeleteSuccess:${row.success},onDeleteError:${row.error}})};`;
   const renderObject = row.hoverRender.arguments[1];
   const countValue = sourceFor(code, row.hoverCount.property.value);
   const existingDataAttributes = objectProperties(row.hoverCount.object, "dataAttributes");
