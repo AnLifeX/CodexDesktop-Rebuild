@@ -58,6 +58,30 @@ test("Windows releases use official+rN codex-win tags and ZIP-only public assets
   }
 });
 
+test("Windows builds match and record the Codex CLI bundled by the official MSIX", () => {
+  for (const { name, text } of workflows) {
+    const syncIndex = text.indexOf("name: Sync upstream Windows package");
+    const cliIndex = text.indexOf("name: Match official Codex CLI runtime");
+    const patchIndex = text.indexOf("scripts/patch-all.js win");
+    assert.ok(syncIndex !== -1 && syncIndex < cliIndex, `${name} must inspect the synced MSIX`);
+    assert.ok(cliIndex < patchIndex, `${name} must install the matching CLI before patching`);
+    assert.match(text, /configure-codex-cli-version\.js `\n\s+--binary src\/win\/codex\.exe/);
+    assert.match(text, /--write-package package\.json `\n\s+--github-output/);
+    assert.match(
+      text,
+      /npm install --ignore-scripts --no-audit --no-fund --save-optional --save-exact "@openai\/codex@\$codexCliVersion"/,
+    );
+    assert.match(text, /windows_codex_cli_version: \$\{\{ steps\.codex_cli\.outputs\.codex_cli_version \}\}/);
+    assert.match(text, /--version "\$WINDOWS_CODEX_CLI_VERSION" \\\n\s+--write-package package\.json/);
+    assert.match(
+      text,
+      /npm install --package-lock-only --ignore-scripts --no-audit --no-fund \\\n\s+--save-optional --save-exact "@openai\/codex@\$WINDOWS_CODEX_CLI_VERSION"/,
+    );
+    assert.match(text, /git add package\.json package-lock\.json scripts\/upstream-versions\.json/);
+    assert.match(text, /Bundled Codex CLI:/);
+  }
+});
+
 test("the manual workflow publishes Windows by default", () => {
   const workflow = workflows.find(({ name }) => name === "build.yml").text;
   assert.match(workflow, /publish_release:\s*\n(?:\s+.*\n)*?\s+default: true\s*\n\s+type: boolean/);

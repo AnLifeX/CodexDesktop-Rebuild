@@ -57,6 +57,7 @@ jobs:
     outputs:
       windows_upstream_version: ${{ steps.windows_version.outputs.windows_upstream_version }}
       windows_internal_app_version: ${{ steps.windows_version.outputs.windows_internal_app_version }}
+      windows_codex_cli_version: ${{ steps.codex_cli.outputs.codex_cli_version }}
       windows_rebuild_revision: ${{ steps.windows_version.outputs.windows_rebuild_revision }}
       windows_release_version: ${{ steps.windows_version.outputs.windows_release_version }}
       windows_package_version: ${{ steps.windows_version.outputs.windows_package_version }}
@@ -82,6 +83,19 @@ jobs:
       - name: Sync upstream Windows package
         run: node scripts/sync-upstream.js --force --skip-mac
 
+      - name: Match official Codex CLI runtime
+        id: codex_cli
+        shell: pwsh
+        run: |
+          node scripts/configure-codex-cli-version.js `
+            --binary src/win/codex.exe `
+            --write-package package.json `
+            --github-output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $codexCliVersion = node -p "require('./package.json').optionalDependencies['@openai/codex']"
+          npm install --ignore-scripts --no-audit --no-fund --save-optional --save-exact "@openai/codex@$codexCliVersion"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Resolve actual Windows release version
         id: windows_version
         run: node scripts/configure-windows-release-version.js --previous scripts/upstream-versions.json --write-package package.json --write-package src/win/_asar/package.json --github-output
@@ -96,6 +110,7 @@ jobs:
           "CODEX_REBUILD_INSTALLER_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Write-Host "Windows MSIX: ${{ steps.windows_version.outputs.windows_upstream_version }}"
           Write-Host "Windows official app: ${{ steps.windows_version.outputs.windows_internal_app_version }}"
+          Write-Host "Official Codex CLI: ${{ steps.codex_cli.outputs.codex_cli_version }}"
           Write-Host "Windows public release: ${{ steps.windows_version.outputs.windows_release_version }}"
           Write-Host "Windows Squirrel package: $version"
 
@@ -251,6 +266,7 @@ jobs:
         env:
           WINDOWS_UPSTREAM_VERSION: ${{ needs.build-windows.outputs.windows_upstream_version }}
           WINDOWS_INTERNAL_APP_VERSION: ${{ needs.build-windows.outputs.windows_internal_app_version }}
+          WINDOWS_CODEX_CLI_VERSION: ${{ needs.build-windows.outputs.windows_codex_cli_version }}
         run: |
           set -euo pipefail
           node scripts/configure-windows-release-version.js \
@@ -259,11 +275,16 @@ jobs:
             --release-version "${{ needs.build-windows.outputs.windows_release_version }}" \
             --write-package package.json \
             --write-tracked scripts/upstream-versions.json
+          node scripts/configure-codex-cli-version.js \
+            --version "$WINDOWS_CODEX_CLI_VERSION" \
+            --write-package package.json
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund \
+            --save-optional --save-exact "@openai/codex@$WINDOWS_CODEX_CLI_VERSION"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json scripts/upstream-versions.json
+          git add package.json package-lock.json scripts/upstream-versions.json
           if ! git diff --cached --quiet; then
-            git commit -m "Bump Windows version to $WINDOWS_UPSTREAM_VERSION"
+            git commit -m "Bump Windows to $WINDOWS_UPSTREAM_VERSION and Codex CLI to $WINDOWS_CODEX_CLI_VERSION"
             git push origin HEAD
           else
             echo "No Windows version metadata change"
@@ -293,6 +314,7 @@ jobs:
           target_commitish: master
           body: |
             Windows-only rebuild from official Codex `${{ needs.build-windows.outputs.windows_internal_app_version }}` (MSIX `${{ needs.build-windows.outputs.windows_upstream_version }}`).
+            - Bundled Codex CLI: `${{ needs.build-windows.outputs.windows_codex_cli_version }}` (matched from the official MSIX).
             - Portable ZIP and installer ZIP are attached below.
             - The installer executable is inside the ZIP to avoid direct `.exe` browser download blocking.
             - Scheduled releases also publish Squirrel update packages separately to `windows-update-feed`.

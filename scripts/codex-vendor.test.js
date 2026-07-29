@@ -125,6 +125,11 @@ test("accepts a bare exact official Codex version", (t) => {
   assert.equal(getPinnedCodexVersion(project.root), "0.144.1");
 });
 
+test("accepts an exact prerelease official Codex version", (t) => {
+  const project = createProject(t, "0.146.0-alpha.3.1");
+  assert.equal(getPinnedCodexVersion(project.root), "0.146.0-alpha.3.1");
+});
+
 for (const [name, pin] of [
   ["missing", undefined],
   ["range", "^0.144.1"],
