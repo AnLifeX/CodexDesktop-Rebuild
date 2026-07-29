@@ -86,6 +86,77 @@ test("translation specs cover current voice settings and shortcut messages", () 
   }
 });
 
+test("translation specs cover fork-from-older-turn action labels", () => {
+  const assetsDir = path.join(
+    __dirname,
+    "..",
+    "src",
+    "win",
+    "_asar",
+    "webview",
+    "assets",
+  );
+  const required = new Map();
+  for (const name of fs.readdirSync(assetsDir)) {
+    if (!/^local-conversation-thread-.*\.js$/.test(name)) continue;
+    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
+    for (const match of source.matchAll(
+      /id:`(localConversation\.forkFromOlderTurnDialog\.(?:local\.(?:label|workspaceLabel)|worktree\.label))`,defaultMessage:`([^`]*)`/g,
+    )) {
+      required.set(match[1], match[2]);
+    }
+  }
+
+  assert.equal(required.size, 3, "expected all current fork action labels");
+  for (const [messageId, defaultMessage] of required) {
+    assert.ok(
+      ZH_CN_TRANSLATIONS.has(messageId),
+      `missing zh-CN translation: ${messageId} (${defaultMessage})`,
+    );
+  }
+  assert.equal(
+    ZH_CN_TRANSLATIONS.get(
+      "localConversation.forkFromOlderTurnDialog.local.workspaceLabel",
+    ),
+    "使用此工作区",
+  );
+  assert.equal(
+    ZH_CN_TRANSLATIONS.get(
+      "localConversation.forkFromOlderTurnDialog.worktree.label",
+    ),
+    "使用新工作树",
+  );
+});
+
+test("translation specs cover the queued-message side-chat action", () => {
+  const assetsDir = path.join(
+    __dirname,
+    "..",
+    "src",
+    "win",
+    "_asar",
+    "webview",
+    "assets",
+  );
+  const descriptors = [];
+  for (const name of fs.readdirSync(assetsDir)) {
+    if (!/^queued-message-list-.*\.js$/.test(name)) continue;
+    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
+    descriptors.push(
+      ...source.matchAll(
+        /id:`(composer\.queuedMessage\.openInSideChat)`,defaultMessage:`([^`]*)`/g,
+      ),
+    );
+  }
+
+  assert.equal(descriptors.length, 1, "expected the queued side-chat action");
+  assert.equal(descriptors[0][2], "Open in side chat");
+  assert.equal(
+    ZH_CN_TRANSLATIONS.get(descriptors[0][1]),
+    "在侧边任务中打开",
+  );
+});
+
 test("patches the extracted Windows zh-CN catalog in memory", () => {
   const targets = locateTargets("win");
   assert.equal(targets.length, 1);
