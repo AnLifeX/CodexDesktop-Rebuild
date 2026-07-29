@@ -1453,7 +1453,7 @@ function makeWebviewMenuBarFunctionBody() {
 '.cru-action{-webkit-app-region:no-drag;height:28px;border:0;border-radius:7px;padding:0 11px;background:color-mix(in srgb,var(--color-token-foreground) 8%,transparent);color:var(--color-token-text-primary);font-size:12px;font-weight:560;cursor:pointer;transition:background .14s ease,transform .12s ease}',
 '.cru-action:hover{background:color-mix(in srgb,var(--color-token-foreground) 13%,transparent)}',
 '.cru-action:active{transform:translateY(1px)}',
-'.cru-action.primary{background:var(--color-token-button-background,#15803d);color:var(--color-token-button-foreground,#fff)}.cru-action.primary:hover{background:var(--vscode-button-hoverBackground,#16a34a)}',
+'.cru-action.primary{background:var(--color-token-text-primary,#181818);color:var(--color-token-main-surface-primary,#f9f9f9)}.cru-action.primary:hover{background:color-mix(in srgb,var(--color-token-text-primary,#181818) 88%,var(--color-token-main-surface-primary,#f9f9f9))}',
 '.cru-action.danger{background:color-mix(in srgb,var(--cru-error) 18%,transparent);color:var(--cru-error)}.cru-action.danger:hover{background:color-mix(in srgb,var(--cru-error) 25%,transparent)}',
 '.cru-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
 '@keyframes cru-spin{to{transform:rotate(360deg)}}',
