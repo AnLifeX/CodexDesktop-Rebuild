@@ -165,6 +165,7 @@ const MENU_LABEL_TRANSLATIONS = [
   ["Zoom In", "放大"],
   ["Zoom Out", "缩小"],
   ["Actual Size", "实际大小"],
+  ["Browser", "浏览器"],
   ["Toggle Full Screen", "切换全屏"],
   ["Codex Documentation", "Codex 文档"],
   ["Documentation", "文档"],
