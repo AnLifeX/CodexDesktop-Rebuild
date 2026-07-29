@@ -14,7 +14,44 @@ const { parse } = require("acorn");
 const { SRC_DIR, relPath } = require("./patch-util");
 
 const ZH_CN_TRANSLATION_SPECS = [
+  [
+    "composer.mode.agentMode.fullAccessConfirm.files.description",
+    "读取、创建、修改、上传或删除此计算机上任何位置的文件",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.files.title",
+    "文件和文件夹",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.internet.description",
+    "访问网站、发送数据以及使用已启用的插件",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.internet.title",
+    "互联网和已连接的应用",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.riskDescription",
+    "这可能带来敏感数据丢失或泄露、提示词注入等风险。你可以随时关闭此功能。<link>了解更多</link>",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.terminal.description",
+    "运行命令、安装软件和更改系统设置",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.terminal.title",
+    "终端命令",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.warningDescription.chatgptMode",
+    "ChatGPT 将能够在未经你许可的情况下，在此计算机上的任何位置运行命令、使用互联网，以及创建和编辑文件。包括但不限于：",
+  ],
+  [
+    "composer.mode.agentMode.fullAccessConfirm.warningDescription.codeMode",
+    "Codex 将能够在未经你许可的情况下，在此计算机上的任何位置运行命令、使用互联网，以及创建和编辑文件。包括但不限于：",
+  ],
   ["composer.queuedMessage.openInSideChat", "在侧边任务中打开"],
+  ["inbox.automations.createWithCodex", "使用 Codex 创建"],
   [
     "localConversation.forkFromOlderTurnDialog.local.label",
     "使用此工作树",
@@ -27,6 +64,8 @@ const ZH_CN_TRANSLATION_SPECS = [
     "localConversation.forkFromOlderTurnDialog.worktree.label",
     "使用新工作树",
   ],
+  ["projectSetup.createLocalProject.sourceFolderLabel", "源文件夹"],
+  ["projectSetup.createLocalProject.sourceFoldersLabel", "源文件夹"],
   ["codex.command.realtimeVoice", "语音聊天快捷键"],
   ["codex.command.realtimeVoice.endCall", "结束语音聊天"],
   [

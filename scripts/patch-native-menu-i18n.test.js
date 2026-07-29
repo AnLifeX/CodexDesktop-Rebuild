@@ -200,7 +200,7 @@ const { COMMAND_TITLE_TRANSLATIONS, locateTargets, patchSource } = loadPatchModu
 {
   const source = [
     "const nativeMenu=[",
-    "{label:`Browser Back`},{label:`Browser Forward`},",
+    "{label:`Browser`},{label:`Browser Back`},{label:`Browser Forward`},",
     "{label:`Find Next`},{label:`Find Previous`},",
     "{label:`Default app`},{label:`File Explorer`},{label:`Terminal`}",
     "];",
@@ -208,6 +208,7 @@ const { COMMAND_TITLE_TRANSLATIONS, locateTargets, patchSource } = loadPatchModu
   const first = patchSource(source);
 
   for (const expected of [
+    "label:`浏览器`",
     "label:`浏览器后退`",
     "label:`浏览器前进`",
     "label:`查找下一个`",
