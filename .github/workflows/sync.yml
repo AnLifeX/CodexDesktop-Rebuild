@@ -2,7 +2,7 @@ name: Sync Upstream & Build Windows
 
 on:
   schedule:
-    - cron: "0 8 * * *"
+    - cron: "30 8 * * *"
   workflow_dispatch:
     inputs:
       force:
