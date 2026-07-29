@@ -217,6 +217,100 @@ test("translation specs cover the confirmed visible UI gaps", () => {
   }
 });
 
+test("translation specs cover the confirmed keyboard shortcut rows", () => {
+  const expected = new Map([
+    ["codex.command.git.createBranch", "创建分支"],
+    ["codex.commandDescription.git.createBranch", "打开分支创建选项"],
+    ["codex.command.git.createDraftPullRequest", "创建草稿 PR"],
+    [
+      "codex.commandDescription.git.createDraftPullRequest",
+      "打开草稿 PR 创建选项",
+    ],
+    ["codex.command.git.createPullRequest", "创建 PR"],
+    ["codex.commandDescription.git.createPullRequest", "打开 PR 创建选项"],
+    ["codex.command.git.mergePullRequest", "合并 PR"],
+    ["codex.commandDescription.git.mergePullRequest", "打开 PR 合并选项"],
+    ["codex.command.git.openPullRequest", "在 GitHub 上打开 PR"],
+    [
+      "codex.commandDescription.git.openPullRequest",
+      "打开与当前任务关联的 PR",
+    ],
+    ["codex.command.redoAppAction", "重做上一步操作"],
+    [
+      "codex.commandDescription.redoAppAction",
+      "重做最近撤销的应用操作",
+    ],
+    ["codex.command.settings", "设置"],
+    ["codex.commandDescription.settings", "打开 {appName} 设置"],
+    ["codex.command.undoAppAction", "撤销上一步操作"],
+    ["codex.commandDescription.undoAppAction", "撤销最近一次应用操作"],
+    ["codex.command.composer.openProjectPicker", "打开项目选择器"],
+    [
+      "codex.commandDescription.composer.openProjectPicker",
+      "打开当前输入框的项目选择器",
+    ],
+    ["codex.command.composer.startDictation", "开始听写"],
+    [
+      "codex.commandDescription.composer.startDictation",
+      "在当前输入框中开始听写",
+    ],
+    ["codex.command.composer.startVoiceMode", "切换语音模式"],
+    [
+      "codex.commandDescription.composer.startVoiceMode",
+      "开始或停止语音聊天",
+    ],
+    ["codex.command.composer.submit", "发送消息"],
+    [
+      "codex.commandDescription.composer.submit",
+      "发送当前输入框中的消息",
+    ],
+    ["codex.command.composer.toggleFastMode", "切换快速模式"],
+    [
+      "codex.commandDescription.composer.toggleFastMode",
+      "在当前输入框中开启或关闭快速模式",
+    ],
+    ["codex.command.composer.togglePlanMode", "切换规划模式"],
+    [
+      "codex.commandDescription.composer.togglePlanMode",
+      "在当前输入框中开启或关闭规划模式",
+    ],
+    ["codex.command.composer.toggleWorktreeMode", "切换本地/工作树"],
+    [
+      "codex.commandDescription.composer.toggleWorktreeMode",
+      "将当前输入框切换到本地模式或新工作树",
+    ],
+    ["codex.command.copyConversationMarkdown", "复制为 Markdown"],
+    [
+      "codex.commandDescription.copyConversationMarkdown",
+      "将当前任务复制为 Markdown",
+    ],
+    ["codex.command.searchChats", "切换任务…"],
+    ["codex.commandDescription.searchChats", "搜索并切换到任务"],
+  ]);
+  const assetsDir = path.join(
+    __dirname,
+    "..",
+    "src",
+    "win",
+    "_asar",
+    "webview",
+    "assets",
+  );
+  const currentIds = new Set();
+  for (const name of fs.readdirSync(assetsDir)) {
+    if (!/^app-initial-.*\.js$/.test(name)) continue;
+    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
+    for (const match of source.matchAll(/id:`([^`]+)`,defaultMessage:`[^`]*`/g)) {
+      if (expected.has(match[1])) currentIds.add(match[1]);
+    }
+  }
+
+  assert.deepEqual([...currentIds].sort(), [...expected.keys()].sort());
+  for (const [messageId, translation] of expected) {
+    assert.equal(ZH_CN_TRANSLATIONS.get(messageId), translation);
+  }
+});
+
 test("patches the extracted Windows zh-CN catalog in memory", () => {
   const targets = locateTargets("win");
   assert.equal(targets.length, 1);
