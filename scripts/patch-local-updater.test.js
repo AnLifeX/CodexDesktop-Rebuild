@@ -848,6 +848,12 @@ test("runtime downloader cancels in flight, retains bytes, and resumes through a
   assert.ok(patched.includes("加速地址前缀（可选）"));
   assert.ok(patched.includes("proxyPrefix:p()"));
   assert.ok(patched.includes("cru-proxy-input"));
+  assert.ok(
+    patched.includes(
+      ".cru-action.primary{background:var(--color-token-text-primary,#181818);color:var(--color-token-main-surface-primary,#f9f9f9)}",
+    ),
+  );
+  assert.ok(!patched.includes(".cru-action.primary{background:var(--color-token-button-background"));
   assert.ok(patched.includes("clearUpdateState"));
   assert.ok(patched.includes("if(s==='codex-rebuild-updater-top')"));
   assert.ok(
