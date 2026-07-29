@@ -76,7 +76,7 @@
     "https://ghproxy.net/"
   ],
   "optionalDependencies": {
-    "@openai/codex": "0.144.1"
+    "@openai/codex": "0.146.0-alpha.3.1"
   },
   "codexRebuildOfficialVersion": "26.721.41059",
   "codexRebuildRevision": 0,

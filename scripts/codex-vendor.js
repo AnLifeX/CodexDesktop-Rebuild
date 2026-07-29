@@ -21,7 +21,8 @@ const PLATFORM = {
   "linux-x64": { suffix: "linux-x64", target: "x86_64-unknown-linux-musl" },
 };
 
-const EXACT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const EXACT_SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 function describe(value) {
   return value === undefined ? "missing" : JSON.stringify(value);
@@ -92,6 +93,28 @@ function getPinnedCodexVersion(projectRoot) {
     );
   }
   return pinnedVersion;
+}
+
+function parseCodexVersionOutput(output) {
+  const text = typeof output === "string" ? output : String(output);
+  const match = /^codex-cli\s+(\S+)\s*$/.exec(text);
+  if (!match || !EXACT_SEMVER.test(match[1])) {
+    throw new Error(`Codex binary returned an invalid version: ${JSON.stringify(text)}`);
+  }
+  return match[1];
+}
+
+function readCodexBinaryVersion(
+  binaryPath,
+  execFileSyncImpl = childProcess.execFileSync,
+) {
+  let output;
+  try {
+    output = execFileSyncImpl(binaryPath, ["--version"], { encoding: "utf8" });
+  } catch (error) {
+    throw new Error(`Codex binary ${binaryPath} failed version inspection: ${error.message}`);
+  }
+  return parseCodexVersionOutput(output);
 }
 
 function resolveManifestPath(targetRoot, value, field, type) {
@@ -331,19 +354,15 @@ function verifyCodexBinary(
   expectedVersion,
   execFileSyncImpl = childProcess.execFileSync,
 ) {
-  let output;
+  let actual;
   try {
-    output = execFileSyncImpl(binaryPath, ["--version"], { encoding: "utf8" });
+    actual = readCodexBinaryVersion(binaryPath, execFileSyncImpl);
   } catch (error) {
     throw new Error(
       `Codex binary ${binaryPath} failed verification; expected ${expectedVersion}; execution failed: ${error.message}`,
     );
   }
-
-  const text = typeof output === "string" ? output : String(output);
-  const match = /^codex-cli\s+(\S+)\s*$/.exec(text);
-  const actual = match ? match[1] : `unparseable output ${JSON.stringify(text)}`;
-  if (!match || actual !== expectedVersion) {
+  if (actual !== expectedVersion) {
     throw new Error(`Codex binary ${binaryPath} has ${actual}; expected ${expectedVersion}`);
   }
 }
@@ -352,6 +371,8 @@ module.exports = {
   PLATFORM,
   getPinnedCodexVersion,
   installCodexRuntime,
+  parseCodexVersionOutput,
+  readCodexBinaryVersion,
   resolveCodexRuntime,
   verifyCodexBinary,
 };
