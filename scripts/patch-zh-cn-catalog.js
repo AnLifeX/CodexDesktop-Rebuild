@@ -14,6 +14,19 @@ const { parse } = require("acorn");
 const { SRC_DIR, relPath } = require("./patch-util");
 
 const ZH_CN_TRANSLATION_SPECS = [
+  ["composer.queuedMessage.openInSideChat", "在侧边任务中打开"],
+  [
+    "localConversation.forkFromOlderTurnDialog.local.label",
+    "使用此工作树",
+  ],
+  [
+    "localConversation.forkFromOlderTurnDialog.local.workspaceLabel",
+    "使用此工作区",
+  ],
+  [
+    "localConversation.forkFromOlderTurnDialog.worktree.label",
+    "使用新工作树",
+  ],
   ["codex.command.realtimeVoice", "语音聊天快捷键"],
   ["codex.command.realtimeVoice.endCall", "结束语音聊天"],
   [
