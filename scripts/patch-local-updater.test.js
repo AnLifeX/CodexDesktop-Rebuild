@@ -164,7 +164,13 @@ function snapshotLocalUpdaterTargets(asarRoot, relativePaths) {
   assert.ok(bootstrap.includes("Range:'bytes='+offset+'-'"));
   assert.ok(bootstrap.includes("package size or SHA1 mismatch"));
   assert.ok(bootstrap.includes("bytes retained for resume"));
-  assert.ok(bootstrap.includes("startLocalHandoff(item,result.filePath,generation)"));
+  assert.ok(
+    bootstrap.includes(
+      "startLocalHandoff(state.updateFiles,item,result.filePath,requestedProxyPrefixes,generation)",
+    ),
+  );
+  assert.ok(bootstrap.includes("let preferred=release.delta&&release.delta.size>0"));
+  assert.ok(bootstrap.includes("candidate=>candidate.kind==='full'"));
   assert.ok(bootstrap.includes("autoUpdater.setFeedURL({url:feedUrl})"));
   assert.ok(bootstrap.includes("http.createServer((request,response)=>"));
   assert.ok(bootstrap.includes("CODEX_REBUILD_UPDATE_CANCELLED"));
@@ -338,6 +344,132 @@ test("client updater compares rebuild revisions numerically and formats them sep
   assert.equal(context.__CodexRebuildUpdaterLastState.version, "26.707.72221-r0002");
   assert.equal(context.__CodexRebuildUpdaterLastState.updateVersion, releaseVersion);
   assert.ok(makeMainMenuPatch().includes("replace(/-r0*([1-9]\\d*)$/i,' (r$1)')"));
+});
+
+test("runtime downloader prefers delta and keeps a verified full fallback available", async (t) => {
+  const releaseVersion = "2.0.0";
+  const deltaBody = Buffer.from("small-delta-package");
+  const fullBody = Buffer.from("the-complete-full-package-used-only-after-delta-failure");
+  const deltaSha1 = crypto.createHash("sha1").update(deltaBody).digest("hex");
+  const fullSha1 = crypto.createHash("sha1").update(fullBody).digest("hex");
+  const deltaFileName = `Codex-${releaseVersion}-delta.nupkg`;
+  const fullFileName = `Codex-${releaseVersion}-full.nupkg`;
+  const packageRequests = [];
+  const server = http.createServer((request, response) => {
+    if (request.url.startsWith("/RELEASES")) {
+      response.end(
+        `${fullSha1} ${fullFileName} ${fullBody.length}\n` +
+          `${deltaSha1} ${deltaFileName} ${deltaBody.length}\n`,
+      );
+      return;
+    }
+    if (request.url === `/${deltaFileName}`) {
+      packageRequests.push(deltaFileName);
+      response.writeHead(200, { "Content-Length": deltaBody.length });
+      response.end(deltaBody);
+      return;
+    }
+    if (request.url === `/${fullFileName}`) {
+      packageRequests.push(fullFileName);
+      response.writeHead(200, { "Content-Length": fullBody.length });
+      response.end(fullBody);
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const updateUrl = `http://127.0.0.1:${server.address().port}`;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "updater-delta-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const appDir = path.join(root, "app-1.0.0");
+  const packagesDir = path.join(root, "packages");
+  fs.mkdirSync(appDir, { recursive: true });
+  fs.mkdirSync(packagesDir, { recursive: true });
+  fs.writeFileSync(path.join(root, "Update.exe"), "fixture");
+
+  const autoUpdater = new EventEmitter();
+  let activeFeedUrl = null;
+  let finishFallback;
+  let rejectFallback;
+  const fallbackFinished = new Promise((resolve, reject) => {
+    finishFallback = resolve;
+    rejectFallback = reject;
+  });
+  const localManifestFiles = [];
+  autoUpdater.setFeedURL = ({ url }) => {
+    activeFeedUrl = url;
+  };
+  autoUpdater.checkForUpdates = () => {
+    const handoffFeed = activeFeedUrl;
+    (async () => {
+      const releases = (await readHttpBody(`${handoffFeed}/RELEASES`)).toString("utf8");
+      const entries = parseReleaseManifestEntries(releases);
+      localManifestFiles.push(...entries.map((entry) => entry.fileName));
+      const localDelta = await readHttpBody(`${handoffFeed}/${deltaFileName}`);
+      assert.deepEqual(localDelta, deltaBody);
+      const localFull = await readHttpBody(`${handoffFeed}/${fullFileName}`);
+      assert.deepEqual(localFull, fullBody);
+      fs.writeFileSync(path.join(packagesDir, fullFileName), localFull);
+      autoUpdater.emit("update-downloaded");
+      finishFallback();
+    })().catch((error) => {
+      autoUpdater.emit("error", error);
+      rejectFallback(error);
+    });
+  };
+  autoUpdater.quitAndInstall = () => {};
+  const context = {
+    Buffer,
+    URL,
+    clearInterval,
+    clearTimeout,
+    console,
+    globalThis: null,
+    process: {
+      platform: "win32",
+      arch: "x64",
+      argv: ["Codex.exe"],
+      execPath: path.join(appDir, "Codex.exe"),
+      env: {
+        CODEX_REBUILD_UPDATE_URL: updateUrl,
+        CODEX_REBUILD_UPDATE_PROXY_PREFIXES: "",
+      },
+    },
+    require(id) {
+      if (id === "electron") {
+        return {
+          app: {
+            isPackaged: true,
+            getVersion: () => "1.0.0",
+            whenReady: () => Promise.resolve(),
+          },
+          autoUpdater,
+          dialog: {},
+          ipcMain: { handle() {} },
+          BrowserWindow: { getAllWindows: () => [] },
+        };
+      }
+      if (id === "../../package.json") return { codexRebuildWindowsUpdateUrl: updateUrl };
+      return require(id);
+    },
+    setInterval,
+    setTimeout,
+  };
+  context.globalThis = context;
+  vm.runInNewContext(`${makeBootstrapPrefix()}void 0;\n}\n`, context);
+  await new Promise((resolve) => setImmediate(resolve));
+  await context.__CodexRebuildUpdaterCommand.check();
+
+  assert.equal(context.__CodexRebuildUpdaterLastState.status, "available");
+  assert.equal(context.__CodexRebuildUpdaterLastState.updateFile, deltaFileName);
+  assert.equal(context.__CodexRebuildUpdaterLastState.updateSize, deltaBody.length);
+  await context.__CodexRebuildUpdaterCommand.download();
+  await fallbackFinished;
+
+  assert.deepEqual(localManifestFiles, [deltaFileName, fullFileName]);
+  assert.deepEqual(packageRequests, [deltaFileName, fullFileName]);
+  assert.equal(context.__CodexRebuildUpdaterLastState.status, "ready");
 });
 
 test("runtime downloader adopts a legacy incomplete package, resumes it, and verifies SHA1", async (t) => {
@@ -912,8 +1044,8 @@ test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appen
   const patched = patchWebviewMenuBarCode(source);
 
   assert.match(patched, /function codexRebuildUpdaterTitlebar\(\)/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v5/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v5/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v6/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v6/);
   const menuRoot = patched.indexOf("children:[(0,Ji.jsx)(`button`,{className:i,children:r}),null");
   const attachment = patched.indexOf("/* CodexRebuildUpdaterTitlebar:descriptor:start */");
   assert.ok(menuRoot >= 0 && attachment > menuRoot, "updater must be attached to the modern menu root");
@@ -1062,15 +1194,15 @@ test("rejects stale or mismatched canonical updater block versions", () => {
   );
 });
 
-test("migrates the v4 updater layers to the isolated local Squirrel handoff contract", () => {
-  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 5);
+test("migrates the v5 updater layers to the delta-aware local Squirrel handoff contract", () => {
+  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 6);
   const current = applyLocalUpdaterPlan(makeCleanLocalUpdaterSources());
   const legacy = {
     packageSource: current.packageSource,
     files: Object.fromEntries(
       Object.entries(current.files).map(([file, source]) => [
         file,
-        source.replaceAll(":v5 */", ":v4 */"),
+        source.replaceAll(":v6 */", ":v5 */"),
       ]),
     ),
   };
@@ -1083,7 +1215,7 @@ test("migrates the v4 updater layers to the isolated local Squirrel handoff cont
   );
   assert.ok(
     Object.values(migrated.files).every(
-      (source) => !source.includes(":v4 */"),
+      (source) => !source.includes(":v5 */"),
     ),
   );
   assert.equal(planLocalUpdaterSources(migrated).status, "already");
