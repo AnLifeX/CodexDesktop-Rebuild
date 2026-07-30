@@ -19,8 +19,8 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 5;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4];
+const LOCAL_UPDATER_CONTRACT_VERSION = 6;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5];
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";
@@ -306,19 +306,19 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       if(!kind)continue;
       let version=parseReleaseVersion(fileName);
       if(!version||!Number.isFinite(size))continue;
-      let release=byVersion.get(version)||{version,fileName:null,size:null,sha1:null,files:[]};
+      let release=byVersion.get(version)||{version,fileName:null,size:null,sha1:null,files:[],full:null,delta:null};
       let item={fileName,size,kind,sha1};
       release.files.push(item);
-      if(kind==='full'){
-        release.fileName=fileName;
-        release.size=size;
-        release.sha1=sha1;
-      }
+      release[kind]=item;
       byVersion.set(version,release);
     }
     let best=null;
     for(let release of byVersion.values()){
-      if(!release.fileName)continue;
+      if(!release.full)continue;
+      let preferred=release.delta&&release.delta.size>0&&release.delta.size<release.full.size?release.delta:release.full;
+      release.fileName=preferred.fileName;
+      release.size=preferred.size;
+      release.sha1=preferred.sha1;
       if(best==null||compareVersions(release.version,best.version)>0)best=release;
     }
     return best;
@@ -400,23 +400,53 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     try{handoff.server.close()}catch{}
     for(let socket of handoff.sockets)try{socket.destroy()}catch{}
     restoreRemoteFeed();
-    if(removeSource){
+    if(removeSource)for(let [fileName,sourcePath] of handoff.sources){
       try{
-        let finalPath=path.join(packagesDir,handoff.item.fileName);
-        if(fs.existsSync(finalPath)&&fs.statSync(finalPath).size===handoff.item.size){
-          fs.rmSync(handoff.sourcePath,{force:!0});
-        }
+        let item=handoff.items.get(fileName),finalPath=path.join(packagesDir,fileName);
+        if(item&&fs.existsSync(finalPath)&&fs.statSync(finalPath).size===item.size)fs.rmSync(sourcePath,{force:!0});
       }catch{}
     }
   };
-  let startLocalHandoff=(item,sourcePath,generation)=>new Promise((resolve,reject)=>{
+  let startLocalHandoff=(releaseItems,item,sourcePath,requestedProxyPrefixes,generation)=>new Promise((resolve,reject)=>{
     if(generation!==downloadGeneration){reject(cancellationError());return}
     closeLocalHandoff();
     let token=crypto.randomBytes(16).toString('hex');
     let basePath='/'+token+'/';
-    let manifest=item.sha1+' '+item.fileName+' '+item.size+'\\n';
+    let items=new Map;
+    for(let candidate of [item,...(Array.isArray(releaseItems)?releaseItems:[])]){
+      if(candidate?.fileName&&candidate?.sha1&&Number.isFinite(candidate.size)&&!items.has(candidate.fileName))items.set(candidate.fileName,candidate);
+    }
+    if(![...items.values()].some(candidate=>candidate.kind==='full')){reject(Error('local update feed requires a full package'));return}
+    let manifest=[...items.values()].map(candidate=>candidate.sha1+' '+candidate.fileName+' '+candidate.size).join('\\n')+'\\n';
+    let sources=new Map([[item.fileName,sourcePath]]),pendingSources=new Map;
     let sockets=new Set,settled=!1;
     let finish=(error,value)=>{if(settled)return;settled=!0;error?reject(error):resolve(value)};
+    let resolveSource=requestedItem=>{
+      let existing=sources.get(requestedItem.fileName);
+      if(existing)return Promise.resolve(existing);
+      let pending=pendingSources.get(requestedItem.fileName);
+      if(pending)return pending;
+      let settleFallback;
+      activeDownloadSettlement=new Promise(resolve=>{settleFallback=resolve});
+      pending=(async()=>{
+        try{
+          if(localHandoff){localHandoff.fetchingItem=requestedItem;localHandoff.item=requestedItem}
+          let result=await downloadPackage(requestedItem,requestedProxyPrefixes,generation);
+          sources.set(requestedItem.fileName,result.filePath);
+          if(localHandoff){
+            localHandoff.fetchingItem=null;
+            let elapsedMs=state.downloadStartedAt?Date.now()-state.downloadStartedAt:null;
+            setStatus('preparing',{error:null,downloadedBytes:requestedItem.size,resumedBytes:result.resumedFrom||0,downloadSource:result.source,elapsedMs,activeDownloadFile:requestedItem.fileName,activeDownloadSize:requestedItem.size});
+          }
+          return result.filePath;
+        }finally{
+          pendingSources.delete(requestedItem.fileName);
+          settleFallback();
+        }
+      })();
+      pendingSources.set(requestedItem.fileName,pending);
+      return pending;
+    };
     let server=http.createServer((request,response)=>{
       let pathname;
       try{pathname=new urlMod.URL(request.url,'http://127.0.0.1').pathname}catch{response.writeHead(400).end();return}
@@ -428,25 +458,31 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       }
       let requestedName;
       try{requestedName=decodeURIComponent(pathname.slice(basePath.length))}catch{requestedName=''}
-      if(!pathname.startsWith(basePath)||requestedName!==item.fileName){response.writeHead(404).end();return}
-      let start=0,end=item.size-1,status=200;
-      let range=String(request.headers.range||'').match(/^bytes=(\d+)-(\d*)$/i);
-      if(range){
-        start=Number(range[1]);
-        if(range[2])end=Math.min(Number(range[2]),end);
-        if(!Number.isFinite(start)||start<0||start>=item.size||end<start){
-          response.writeHead(416,{'Content-Range':'bytes */'+item.size});
-          response.end();
-          return;
+      let requestedItem=pathname.startsWith(basePath)?items.get(requestedName):null;
+      if(!requestedItem){response.writeHead(404).end();return}
+      (async()=>{
+        let resolvedSource=await resolveSource(requestedItem);
+        if(generation!==downloadGeneration)throw cancellationError();
+        let start=0,end=requestedItem.size-1,status=200;
+        let range=String(request.headers.range||'').match(/^bytes=(\\d+)-(\\d*)$/i);
+        if(range){
+          start=Number(range[1]);
+          if(range[2])end=Math.min(Number(range[2]),end);
+          if(!Number.isFinite(start)||start<0||start>=requestedItem.size||end<start){
+            response.writeHead(416,{'Content-Range':'bytes */'+requestedItem.size});
+            response.end();
+            return;
+          }
+          status=206;
         }
-        status=206;
-      }
-      let headers={'Content-Type':'application/octet-stream','Content-Length':end-start+1,'Cache-Control':'no-store','Accept-Ranges':'bytes'};
-      if(status===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+item.size;
-      response.writeHead(status,headers);
-      let input=fs.createReadStream(sourcePath,{start,end});
-      input.on('error',error=>response.destroy(error));
-      input.pipe(response);
+        let headers={'Content-Type':'application/octet-stream','Content-Length':end-start+1,'Cache-Control':'no-store','Accept-Ranges':'bytes'};
+        if(status===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+requestedItem.size;
+        response.writeHead(status,headers);
+        if(request.method==='HEAD'){response.end();return}
+        let input=fs.createReadStream(resolvedSource,{start,end});
+        input.on('error',error=>response.destroy(error));
+        input.pipe(response);
+      })().catch(error=>{if(!response.headersSent)response.writeHead(isCancellationError(error)?499:502);response.end()});
     });
     server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket))});
     server.once('error',error=>{try{server.close()}catch{}finish(error)});
@@ -455,7 +491,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       let address=server.address();
       if(!address||typeof address==='string'){try{server.close()}catch{}finish(Error('local update feed failed to bind'));return}
       let feedUrl='http://127.0.0.1:'+address.port+basePath.slice(0,-1);
-      localHandoff={server,sockets,item,sourcePath,generation,feedUrl};
+      localHandoff={server,sockets,item,items,sources,pendingSources,fetchingItem:null,generation,feedUrl};
       cancelledLocalHandoff=!1;
       try{
         autoUpdater.setFeedURL({url:feedUrl});
@@ -625,7 +661,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
   };
   let updateProgress=()=>{
     if(!downloading)return;
-    if(localHandoff){
+    if(localHandoff&&!localHandoff.fetchingItem){
       let elapsedMs=state.downloadStartedAt?Date.now()-state.downloadStartedAt:null;
       setStatus('preparing',{downloadedBytes:localHandoff.item.size,elapsedMs,activeDownloadFile:localHandoff.item.fileName,activeDownloadSize:localHandoff.item.size});
       return;
@@ -734,7 +770,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     }
     let item=state.updateFiles?.find?.(candidate=>candidate.fileName===state.updateFile);
     if(!item?.sha1||!Number.isFinite(item.size)){
-      setStatus('error',{error:'RELEASES is missing a valid full-package SHA1 or size'});
+      setStatus('error',{error:'RELEASES is missing a valid selected-package SHA1 or size'});
       return emit();
     }
     downloadRequested=!0;
@@ -751,7 +787,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     try{
       let result=await downloadPackage(item,requestedProxyPrefixes,generation);
       setStatus('preparing',{error:null,downloadedBytes:item.size,resumedBytes:result.resumedFrom||retained,downloadSource:result.source});
-      await startLocalHandoff(item,result.filePath,generation);
+      await startLocalHandoff(state.updateFiles,item,result.filePath,requestedProxyPrefixes,generation);
     }catch(e){
       if(isCancellationError(e)||generation!==downloadGeneration){
         return emit();
@@ -773,6 +809,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     if(!downloading||state.status!=='downloading')return emit();
     let settlement=activeDownloadSettlement;
     downloadGeneration+=1;
+    if(localHandoff){cancelledLocalHandoff=!0;closeLocalHandoff()}
     let attempt=activeDownloadAttempt;
     activeDownloadAttempt=null;
     let error=cancellationError();
@@ -1745,7 +1782,7 @@ function analyzeModernWebviewMenuBarCode(code) {
   };
 }
 
-function inspectModernUpdaterTitlebarSource(code) {
+function inspectModernUpdaterTitlebarSource(code, { allowLegacy = false } = {}) {
   const functionCount = countOccurrences(code, `function ${MODERN_UPDATER_COMPONENT}()`);
   if (functionCount !== 1) {
     throw new Error(`Windows modern updater component expected exactly 1 target, found ${functionCount}`);
@@ -1795,34 +1832,51 @@ function inspectModernUpdaterTitlebarSource(code) {
   }
   const expectedComponent = makeModernWebviewTitlebarComponent(shape);
   const expectedAttachment = makeModernWebviewTitlebarAttachment(shape);
-  if (
-    componentRange.code !== expectedComponent ||
-    attachmentRange.code !== expectedAttachment
-  ) {
-    throw new Error(
-      "Windows modern updater canonical bytes do not match " +
-        `(component diff ${firstDifferenceIndex(componentRange.code, expectedComponent)}, ` +
-        `attachment diff ${firstDifferenceIndex(attachmentRange.code, expectedAttachment)})`,
-    );
-  }
   const expectedVersions = [
     layerVersionMarker("titlebar-component"),
     layerVersionMarker("titlebar-descriptor"),
   ].sort();
   const versions = updaterVersionSignatures(code).sort();
-  if (
-    versions.length !== expectedVersions.length ||
-    versions.some((version, index) => version !== expectedVersions[index])
-  ) {
-    throw new Error("Windows modern updater titlebar version is stale or mismatched");
+  const isCurrent =
+    componentRange.code === expectedComponent &&
+    attachmentRange.code === expectedAttachment &&
+    versions.length === expectedVersions.length &&
+    !versions.some((candidate, index) => candidate !== expectedVersions[index]);
+  let dialect = "current";
+  let version = LOCAL_UPDATER_CONTRACT_VERSION;
+  if (!isCurrent) {
+    const structuralVersion = STRUCTURAL_LOCAL_UPDATER_VERSIONS.find((candidate) =>
+      [
+        layerVersionMarker("titlebar-component", candidate),
+        layerVersionMarker("titlebar-descriptor", candidate),
+      ]
+        .sort()
+        .every((marker, index) => versions[index] === marker),
+    );
+    if (!allowLegacy || versions.length !== 2 || structuralVersion == null) {
+      throw new Error(
+        "Windows modern updater canonical bytes or version do not match " +
+          `(component diff ${firstDifferenceIndex(componentRange.code, expectedComponent)}, ` +
+          `attachment diff ${firstDifferenceIndex(attachmentRange.code, expectedAttachment)})`,
+      );
+    }
+    dialect = `structural-v${structuralVersion}`;
+    version = structuralVersion;
   }
+  const canonicalSource =
+    dialect === "current"
+      ? code
+      : applyReplacements(code, [
+          { start: componentRange.start, end: componentRange.end, text: expectedComponent },
+          { start: attachmentRange.start, end: attachmentRange.end, text: expectedAttachment },
+        ]);
   return {
     layer: "titlebar",
-    version: LOCAL_UPDATER_CONTRACT_VERSION,
-    dialect: "modern",
+    version,
+    dialect: dialect === "current" ? "modern" : `modern-${dialect}`,
     functionName: shape.functionName,
     menuArrayName: null,
-    canonicalSource: code,
+    canonicalSource,
   };
 }
 
@@ -2048,7 +2102,7 @@ function inspectUpdaterTitlebarSource(code, { allowLegacy = false } = {}) {
     throw new Error("Windows webview updater titlebar source is empty");
   }
   if (code.includes(`function ${MODERN_UPDATER_COMPONENT}()`)) {
-    return inspectModernUpdaterTitlebarSource(code);
+    return inspectModernUpdaterTitlebarSource(code, { allowLegacy });
   }
   const functionCount = countOccurrences(
     code,
