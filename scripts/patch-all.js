@@ -11,7 +11,6 @@
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { verifyPatchedApp } = require("./verify-patched-app");
 
 const PROJECT_ROOT = path.join(__dirname, "..");
 
@@ -33,6 +32,10 @@ const PATCHES = [
   "patch-sidebar-delete.js",
   "patch-show-all-local-sessions.js",
 ];
+
+const NODE_FLAGS_BY_PATCH = new Map([
+  ["patch-local-updater.js", ["--expose-gc"]],
+]);
 
 function readExtractedVersion(projectRoot) {
   const packagePath = path.join(
@@ -72,7 +75,7 @@ function runPatchAll(args, dependencies = {}) {
   const runScript = dependencies.execFileSync ?? execFileSync;
   const logger = dependencies.logger ?? console;
   const projectRoot = dependencies.projectRoot ?? PROJECT_ROOT;
-  const verifier = dependencies.verifyPatchedApp ?? verifyPatchedApp;
+  const verifier = dependencies.verifyPatchedApp;
   const platform = args.find((a) =>
     ["mac-arm64", "mac-x64", "win", "unix"].includes(a),
   );
@@ -88,7 +91,11 @@ function runPatchAll(args, dependencies = {}) {
     logger.log(`\n== ${label} ==`);
 
     try {
-      runScript("node", [scriptPath, ...passArgs], { stdio: "inherit" });
+      runScript(
+        "node",
+        [...(NODE_FLAGS_BY_PATCH.get(script) ?? []), scriptPath, ...passArgs],
+        { stdio: "inherit" },
+      );
     } catch (e) {
       logger.error(`[x] ${label} failed (exit ${e.status})`);
       failed++;
@@ -100,10 +107,27 @@ function runPatchAll(args, dependencies = {}) {
     logger.log("\n== verify-patched-app ==");
     try {
       const expectedVersion = readExtractedVersion(projectRoot);
-      const result = verifier(projectRoot, "win", expectedVersion);
-      logger.log(`  [ok] package-version: ${expectedVersion}`);
-      for (const [contract, evidenceFiles] of Object.entries(result.contracts)) {
-        logger.log(`  [ok] ${contract}: ${evidenceFiles.join(", ")}`);
+      if (verifier) {
+        const result = verifier(projectRoot, "win", expectedVersion);
+        logger.log(`  [ok] package-version: ${expectedVersion}`);
+        for (const [contract, evidenceFiles] of Object.entries(result.contracts)) {
+          logger.log(`  [ok] ${contract}: ${evidenceFiles.join(", ")}`);
+        }
+      } else {
+        runScript(
+          "node",
+          [
+            "--expose-gc",
+            path.join(__dirname, "verify-patched-app.js"),
+            "--root",
+            projectRoot,
+            "--platform",
+            "win",
+            "--expected-version",
+            expectedVersion,
+          ],
+          { stdio: "inherit" },
+        );
       }
     } catch (error) {
       logger.error(`[x] verify-patched-app failed\n${error.message}`);

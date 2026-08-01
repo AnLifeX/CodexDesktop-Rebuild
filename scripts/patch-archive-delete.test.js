@@ -176,6 +176,13 @@ test("rejects malformed native, zero, and ambiguous archive route anchors", () =
     () => patchAppMainSource(withLiveRouter(`${nativeRoute},${nativeRoute}`)),
     /native archive route.*expected exactly 1.*found 2/i,
   );
+  assert.throws(
+    () =>
+      patchAppMainSource(
+        `${withLiveRouter(nativeRoute)};const detached={${route}}`,
+      ),
+    /archive route.*detached.*live native router/i,
+  );
   assert.equal(typeof patchDataControlsSource, "function");
   assert.throws(
     () =>
