@@ -57,10 +57,10 @@ function patchThreadActions(bundles) {
         /archiveThread:\{id:`sidebarElectron\.archiveThread`,defaultMessage:`Archive chat`,description:`Menu item to archive a local thread`\},/;
       const insert =
         "archiveThread:{id:`sidebarElectron.archiveThread`,defaultMessage:`Archive chat`,description:`Menu item to archive a local thread`}," +
-        "deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`删除对话`,description:`Menu item to permanently delete a local thread`}," +
+        "deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`删除聊天`,description:`Menu item to permanently delete a local thread`}," +
         "deleteThreadConfirm:{id:`sidebarElectron.deleteThreadConfirm`,defaultMessage:`确认删除？`,description:`Confirmation shown before permanently deleting a local thread`}," +
         "deleteThreadConfirmAction:{id:`sidebarElectron.deleteThreadConfirmAction`,defaultMessage:`确认`,description:`Inline confirmation button label shown before permanently deleting a local thread`}," +
-        "deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`删除对话失败`,description:`Error message when permanently deleting a local thread`},";
+        "deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`删除聊天失败`,description:`Error message when permanently deleting a local thread`},";
 
       if (!archiveMessageRe.test(code)) {
         console.log(`  [!] ${relPath(bundle.path)}: archiveThread message not found`);
@@ -73,7 +73,7 @@ function patchThreadActions(bundles) {
     const messageReplacements = [
       [
         "deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`Delete chat`,description:`Menu item to permanently delete a local thread`}",
-        "deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`删除对话`,description:`Menu item to permanently delete a local thread`}",
+        "deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`删除聊天`,description:`Menu item to permanently delete a local thread`}",
       ],
       [
         "deleteThreadConfirm:{id:`sidebarElectron.deleteThreadConfirm`,defaultMessage:`Permanently delete this chat?`,description:`Confirmation shown before permanently deleting a local thread`}",
@@ -85,7 +85,7 @@ function patchThreadActions(bundles) {
       ],
       [
         "deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`Failed to delete chat`,description:`Error message when permanently deleting a local thread`}",
-        "deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`删除对话失败`,description:`Error message when permanently deleting a local thread`}",
+        "deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`删除聊天失败`,description:`Error message when permanently deleting a local thread`}",
       ],
     ];
     for (const [from, to] of messageReplacements) {
@@ -820,6 +820,7 @@ function patchThreadActionsSource(code) {
     };
   }
 
+  const replacements = (() => {
   const ast = parseRequired(code, "sidebar thread-actions");
   const archiveMessages = [];
   const actionFunctions = [];
@@ -868,17 +869,19 @@ function patchThreadActionsSource(code) {
   const sendFunction = archiveCalls[0].callee.name;
   const finalReturn = returns.at(-1);
   const messages =
-    ",deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`删除任务`,description:`Menu item to permanently delete a local task`}" +
+    ",deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`删除聊天`,description:`Menu item to permanently delete a local task`}" +
     ",deleteThreadConfirmAction:{id:`sidebarElectron.deleteThreadConfirmAction`,defaultMessage:`确认`,description:`Inline confirmation button label shown before permanently deleting a local task`}" +
-    ",deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`删除任务失败`,description:`Error message when permanently deleting a local task`}";
+    ",deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`删除聊天失败`,description:`Error message when permanently deleting a local task`}";
   const action =
     `${actionMarker}let CodexSidebarDeleteAction=e=>{let{conversationId:n,hostId:i,onDeleteStart:a,onDeleteSuccess:o,onDeleteError:s}=e;` +
     `a?.(),${sendFunction}(\`delete-conversation\`,{conversationId:n,hostId:i}).then(()=>o?.()).catch(()=>s?.())};`;
-  const next = applySourceReplacements(code, [
+  return [
       { start: archiveMessages[0].end, end: archiveMessages[0].end, text: messages },
       { start: resultObjects[0].start + 1, end: resultObjects[0].start + 1, text: "deleteThread:CodexSidebarDeleteAction," },
       { start: finalReturn.start, end: finalReturn.start, text: action },
-    ]);
+    ];
+  })();
+  const next = applySourceReplacements(code, replacements);
   inspectThreadActionsPostcondition(next);
   return {
     code: next,
@@ -1627,6 +1630,7 @@ function patchSidebarSource(code) {
     };
   }
 
+  const replacements = (() => {
   const ast = parseRequired(code, "sidebar UI");
   const hoverFunctions = [];
   const broadRowFunctions = [];
@@ -1685,7 +1689,7 @@ function patchSidebarSource(code) {
     throw new Error("sidebar row has duplicate dataAttributes props");
   }
   const resetDataAttributes = resetDataAttributesSource(code, row.hoverCount.object);
-  const replacements = [
+  return [
     { start: hover.pattern.end - 1, end: hover.pattern.end - 1, text: ",deleteAction:CodexDeleteAction" },
     {
       start: hover.nullTest.start,
@@ -1739,6 +1743,7 @@ function patchSidebarSource(code) {
         text: `,dataAttributes:${resetDataAttributes}`,
       },
   ];
+  })();
   const next = applySourceReplacements(code, replacements);
   try {
     inspectSidebarPostcondition(next);
@@ -2204,6 +2209,29 @@ function formatSidebarSummary(outcomes) {
   return `[summary] sidebar-delete: ready=[${ready.join(",")}] skipped=[${skipped.join(",")}]`;
 }
 
+function findWindowsSidebarTargets(directory) {
+  const threadActionTargets = [];
+  const sidebarTargets = [];
+  for (const fileName of fs.readdirSync(directory)) {
+    if (!fileName.endsWith(".js")) continue;
+    const filePath = path.join(directory, fileName);
+    const source = fs.readFileSync(filePath, "utf-8");
+    const isThreadActions =
+      source.includes("sidebarElectron.archiveThread") &&
+      source.includes("copyConversationMarkdown") &&
+      source.includes("archive-conversation");
+    const isSidebar =
+      source.includes("thread-primary-action") &&
+      source.includes("archive-thread") &&
+      source.includes("additionalHoverActionCount");
+    if (!isThreadActions && !isSidebar) continue;
+    const candidate = { fileName, path: filePath, source };
+    if (isThreadActions) threadActionTargets.push(candidate);
+    if (isSidebar) sidebarTargets.push(candidate);
+  }
+  return { threadActionTargets, sidebarTargets };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const isCheck = args.includes("--check");
@@ -2220,26 +2248,9 @@ function main() {
       if (!fs.existsSync(directory)) {
         throw new Error(`sidebar asset directory is missing for ${platformName}`);
       }
-      const candidates = fs.readdirSync(directory)
-        .filter((fileName) => fileName.endsWith(".js"))
-        .map((fileName) => {
-          const filePath = path.join(directory, fileName);
-          return { fileName, path: filePath, source: fs.readFileSync(filePath, "utf-8") };
-        });
       return {
         platform: platformName,
-        threadActionTargets: candidates.filter(
-          (candidate) =>
-            candidate.source.includes("sidebarElectron.archiveThread") &&
-            candidate.source.includes("copyConversationMarkdown") &&
-            candidate.source.includes("archive-conversation"),
-        ),
-        sidebarTargets: candidates.filter(
-          (candidate) =>
-            candidate.source.includes("thread-primary-action") &&
-            candidate.source.includes("archive-thread") &&
-            candidate.source.includes("additionalHoverActionCount"),
-        ),
+        ...findWindowsSidebarTargets(directory),
       };
     }
     const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");
@@ -2280,5 +2291,6 @@ module.exports = {
   patchSidebarContracts,
   planSidebarPlatform,
   executeSidebarPlatforms,
+  findWindowsSidebarTargets,
   formatSidebarSummary,
 };

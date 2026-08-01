@@ -4,34 +4,39 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  ZH_CN_FORCED_OVERRIDES,
   ZH_CN_TRANSLATIONS,
   locateTargets,
   patchCatalogSource,
 } = require("./patch-zh-cn-catalog");
+const { extractCatalogMessages } = require("./audit-zh-cn-catalog");
 
-test("adds missing catalog messages and refreshes stale translations", () => {
+test("adds missing messages, preserves upstream translations, and applies explicit corrections", () => {
   const fixture = [
     'import{n as e}from"./runtime.js";',
     "var t,n,r,decoy;",
     "e((()=>{",
     "t=`备用`,n=`团队`,",
     'decoy={"voice.existing":`不要修改`},',
-    'r={"voice.existing":`旧翻译`}',
+    'r={"voice.existing":`上游翻译`,"voice.override":`旧翻译`}',
     "}))();",
     "export{r as default,t as greeting,n as kKSGje};",
   ].join("");
   const translations = new Map([
     ["voice.existing", "新翻译"],
+    ["voice.override", "纠正翻译"],
     ["voice.added", "新增翻译"],
   ]);
-  const first = patchCatalogSource(fixture, translations);
+  const overrides = new Map([["voice.override", "纠正翻译"]]);
+  const first = patchCatalogSource(fixture, translations, overrides);
 
   assert.equal(first.replacements.length, 2);
   assert.match(first.code, /decoy=\{"voice\.existing":`不要修改`\}/);
-  assert.match(first.code, /"voice\.existing":`新翻译`/);
+  assert.match(first.code, /"voice\.existing":`上游翻译`/);
+  assert.match(first.code, /"voice\.override":`纠正翻译`/);
   assert.match(first.code, /"voice\.added":`新增翻译`/);
 
-  const second = patchCatalogSource(first.code, translations);
+  const second = patchCatalogSource(first.code, translations, overrides);
   assert.equal(second.code, first.code);
   assert.equal(second.replacements.length, 0);
 });
@@ -153,14 +158,13 @@ test("translation specs cover the queued-message side-chat action", () => {
   assert.equal(descriptors[0][2], "Open in side chat");
   assert.equal(
     ZH_CN_TRANSLATIONS.get(descriptors[0][1]),
-    "在侧边任务中打开",
+    "在侧边聊天中打开",
   );
 });
 
 test("translation specs cover the confirmed visible UI gaps", () => {
   const expected = new Map([
     ["inbox.automations.createWithCodex", "使用 Codex 创建"],
-    ["projectSetup.createLocalProject.sourceFolderLabel", "源文件夹"],
     ["projectSetup.createLocalProject.sourceFoldersLabel", "源文件夹"],
     [
       "composer.mode.agentMode.fullAccessConfirm.warningDescription.chatgptMode",
@@ -233,7 +237,7 @@ test("translation specs cover the confirmed keyboard shortcut rows", () => {
     ["codex.command.git.openPullRequest", "在 GitHub 上打开 PR"],
     [
       "codex.commandDescription.git.openPullRequest",
-      "打开与当前任务关联的 PR",
+      "打开与当前聊天关联的 PR",
     ],
     ["codex.command.redoAppAction", "重做上一步操作"],
     [
@@ -282,10 +286,10 @@ test("translation specs cover the confirmed keyboard shortcut rows", () => {
     ["codex.command.copyConversationMarkdown", "复制为 Markdown"],
     [
       "codex.commandDescription.copyConversationMarkdown",
-      "将当前任务复制为 Markdown",
+      "将当前聊天复制为 Markdown",
     ],
-    ["codex.command.searchChats", "切换任务…"],
-    ["codex.commandDescription.searchChats", "搜索并切换到任务"],
+    ["codex.command.searchChats", "切换聊天…"],
+    ["codex.commandDescription.searchChats", "搜索并切换到聊天"],
   ]);
   const assetsDir = path.join(
     __dirname,
@@ -316,10 +320,16 @@ test("patches the extracted Windows zh-CN catalog in memory", () => {
   assert.equal(targets.length, 1);
   const source = fs.readFileSync(targets[0].path, "utf8");
   const localized = patchCatalogSource(source).code;
+  const before = extractCatalogMessages(source);
+  const after = extractCatalogMessages(localized);
   for (const [messageId, translation] of ZH_CN_TRANSLATIONS) {
-    assert.ok(
-      localized.includes(`${JSON.stringify(messageId)}:\`${translation}\``),
-      `catalog is missing localized message: ${messageId}`,
+    const expected = before.has(messageId)
+      ? (ZH_CN_FORCED_OVERRIDES.get(messageId) ?? before.get(messageId))
+      : translation;
+    assert.equal(
+      after.get(messageId),
+      expected,
+      `catalog has an unexpected localized message: ${messageId}`,
     );
   }
 });

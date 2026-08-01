@@ -73,9 +73,16 @@ const { COMMAND_TITLE_TRANSLATIONS, locateTargets, patchSource } = loadPatchModu
   const presentMessageIds = new Set(
     [...sourceCatalog.matchAll(/id:\`(codex\.commandMenuTitle\.[^`]+)\`/g)].map((match) => match[1]),
   );
+  const missingMessageIds = [...presentMessageIds].filter(
+    (messageId) => !translationsByMessageId.has(messageId),
+  );
+  assert.deepStrictEqual(
+    missingMessageIds,
+    [],
+    `missing translation specifications: ${missingMessageIds.join(", ")}`,
+  );
   for (const messageId of presentMessageIds) {
     const translations = translationsByMessageId.get(messageId);
-    assert.ok(translations, `missing translation specification for: ${messageId}`);
     assert.ok(
       translations.some((to) => localized.includes(`defaultMessage:\`${to}\``)),
       `missing catalog translation for: ${messageId}`,
@@ -138,7 +145,7 @@ const { COMMAND_TITLE_TRANSLATIONS, locateTargets, patchSource } = loadPatchModu
     "menuTitle:`重命名任务`",
     "menuTitle:`归档任务`",
     "menuTitle:`固定/取消固定任务`",
-    "menuTitle:`显示助手`",
+    "menuTitle:`显示虚拟宠物`",
     "menuTitle:`上一个任务`",
     "menuTitle:`下一个任务`",
     ...Array.from({ length: 9 }, (_, index) => `menuTitle:\`转到任务 ${index + 1}\``),
@@ -244,18 +251,18 @@ const { COMMAND_TITLE_TRANSLATIONS, locateTargets, patchSource } = loadPatchModu
   const first = patchSource(source);
 
   for (const expected of [
-    "a=`trayMenu.newChat`,b=`新建对话`",
-    "c=`trayMenu.projectlessThreads`,d=`对话`",
-    "defaultMessage:`归档对话`",
-    "defaultMessage:`新建无项目任务`",
-    "defaultMessage:`新建对话`",
-    "defaultMessage:`下一个对话`",
-    "defaultMessage:`上一个对话`",
-    "defaultMessage:`重命名对话`",
-    "defaultMessage:`搜索对话...`",
-    "defaultMessage:`转到对话 1`",
+    "a=`trayMenu.newChat`,b=`新聊天`",
+    "c=`trayMenu.projectlessThreads`,d=`聊天`",
+    "defaultMessage:`归档聊天`",
+    "defaultMessage:`新建独立聊天`",
+    "defaultMessage:`新聊天`",
+    "defaultMessage:`下一个聊天`",
+    "defaultMessage:`上一个聊天`",
+    "defaultMessage:`重命名聊天`",
+    "defaultMessage:`搜索聊天…`",
+    "defaultMessage:`转到聊天 1`",
     "defaultMessage:`切换审查面板`",
-    "defaultMessage:`固定/取消固定对话`",
+    "defaultMessage:`置顶/取消置顶聊天`",
   ]) {
     assert.ok(first.code.includes(expected), `missing current-bundle translation: ${expected}`);
   }

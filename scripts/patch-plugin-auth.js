@@ -1855,6 +1855,39 @@ function formatPluginSummary(outcomes) {
   return `[summary] plugin-auth: ready=[${ready.join(",")}] skipped=[${skipped.join(",")}]`;
 }
 
+function findWindowsPluginCandidates(platformName) {
+  const roots = [
+    {
+      path: path.join(SRC_DIR, platformName, "_asar", ".vite", "build"),
+      kind: "main",
+    },
+    {
+      path: path.join(SRC_DIR, platformName, "_asar", "webview", "assets"),
+      kind: "webview",
+    },
+  ];
+  const candidates = [];
+  for (const root of roots) {
+    if (!fs.existsSync(root.path)) continue;
+    for (const fileName of fs.readdirSync(root.path)) {
+      if (!fileName.endsWith(".js")) continue;
+      if (root.kind === "main" && !/^main-.*\.js$/.test(fileName)) continue;
+      const filePath = path.join(root.path, fileName);
+      const source = fs.readFileSync(filePath, "utf-8");
+      const isSemanticWebview =
+        root.kind === "webview" &&
+        source.includes("authMethod") &&
+        source.includes("browser_use_external") &&
+        source.includes("computer_use");
+      if (root.kind === "webview" && !classifyPluginTarget(fileName, source) && !isSemanticWebview) {
+        continue;
+      }
+      candidates.push({ fileName, filePath, source });
+    }
+  }
+  return candidates;
+}
+
 // ── Target location ──
 
 function locateTargets(platform) {
@@ -1940,6 +1973,12 @@ function main() {
 
   const execution = executePluginPlatforms({
     platformInputs: platforms.map((platformName) => {
+    if (platformName === "win") {
+      return {
+        platform: platformName,
+        candidates: findWindowsPluginCandidates(platformName),
+      };
+    }
     const roots = [
       path.join(SRC_DIR, platformName, "_asar", ".vite", "build"),
       path.join(SRC_DIR, platformName, "_asar", "webview", "assets"),
@@ -1983,5 +2022,6 @@ module.exports = {
   classifyPluginTarget,
   planPluginPlatform,
   executePluginPlatforms,
+  findWindowsPluginCandidates,
   formatPluginSummary,
 };

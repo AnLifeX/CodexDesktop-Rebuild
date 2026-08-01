@@ -703,7 +703,12 @@ function inspectArchiveAppMainSource(source) {
   }
   if (native.length > 0) {
     if (native.length !== 1) throw new Error(`native archive route expected exactly 1 target, found ${native.length}`);
-    return { mode: "native", status: "native" };
+    const routeObject = native[0].ancestors.at(-1);
+    return {
+      mode: "native",
+      status: "native",
+      routeRange: { start: routeObject.start, end: routeObject.end },
+    };
   }
   if (legacy.length > 0) {
     if (legacy.length !== 1) throw new Error(`legacy archive route expected exactly 1 target, found ${legacy.length}`);
@@ -764,12 +769,25 @@ function patchAppMainSource(source) {
   const manager = match[3];
   const conversationId = match[4];
   const end = match.index + match[0].length;
+  if (
+    inspection?.mode === "native" &&
+    (match.index < inspection.routeRange.start || end > inspection.routeRange.end)
+  ) {
+    throw new Error("archive route is detached from the live native router");
+  }
   const injection = `,${quote}delete-conversation${quote}:${wrapper}(async(${manager},{conversationId:${conversationId}})=>{await ${manager}.sendRequest(${quote}thread/delete${quote},{threadId:${conversationId}})})`;
   const code = source.slice(0, end) + injection + source.slice(end);
-  const patchedInspection = inspectArchiveAppMainSource(code);
   const expectedMode = inspection?.mode === "native" ? "combined" : "legacy";
-  if (patchedInspection?.mode !== expectedMode) {
-    throw new Error(`${expectedMode} archive route postcondition was not established`);
+  if (expectedMode === "legacy") {
+    const patchedInspection = inspectArchiveAppMainSource(code);
+    if (patchedInspection?.mode !== expectedMode) {
+      throw new Error(`${expectedMode} archive route postcondition was not established`);
+    }
+  } else if (
+    !code.includes(`${quote}delete-conversation${quote}:${wrapper}(async(`) ||
+    !code.includes(`sendRequest(${quote}thread/delete${quote},{threadId:${conversationId}})`)
+  ) {
+    throw new Error("combined archive route postcondition was not established");
   }
   return {
     code,
@@ -1422,6 +1440,27 @@ function formatArchiveSummary(outcomes) {
   return `[summary] archive-delete: ready=[${ready.join(",")}] skipped=[${skipped.join(",")}]`;
 }
 
+function findWindowsArchiveTargets(directory) {
+  const appMainTargets = [];
+  const dataControlsTargets = [];
+  for (const fileName of fs.readdirSync(directory)) {
+    if (!fileName.endsWith(".js")) continue;
+    const isDataControlsName = /^data-controls-.*\.js$/.test(fileName);
+    const filePath = path.join(directory, fileName);
+    const source = fs.readFileSync(filePath, "utf-8");
+    const isAppMain =
+      source.includes("archive-conversation") &&
+      source.includes(".archiveConversation(");
+    const isDataControls =
+      isDataControlsName && mayContainArchiveDataControlsContract(source);
+    if (!isAppMain && !isDataControls) continue;
+    const candidate = { fileName, path: filePath, source };
+    if (isAppMain) appMainTargets.push(candidate);
+    if (isDataControls) dataControlsTargets.push(candidate);
+  }
+  return { appMainTargets, dataControlsTargets };
+}
+
 // ─── Main ───────────────────────────────────────────────────────
 
 function main() {
@@ -1442,26 +1481,9 @@ function main() {
       if (!fs.existsSync(directory)) {
         throw new Error(`archive asset directory is missing for ${platformName}`);
       }
-      const candidates = fs.readdirSync(directory)
-        .filter((fileName) => fileName.endsWith(".js"))
-        .map((fileName) => {
-          const filePath = path.join(directory, fileName);
-          return { fileName, path: filePath, source: fs.readFileSync(filePath, "utf-8") };
-        });
-      const appMainTargets = candidates.filter(
-        (candidate) =>
-          candidate.source.includes("archive-conversation") &&
-          candidate.source.includes(".archiveConversation("),
-      );
-      const dataControlsTargets = candidates.filter(
-        (candidate) =>
-          /^data-controls-.*\.js$/.test(candidate.fileName) &&
-          mayContainArchiveDataControlsContract(candidate.source),
-      );
       return {
         platform: platformName,
-        appMainTargets,
-        dataControlsTargets,
+        ...findWindowsArchiveTargets(directory),
       };
     }
     const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");
@@ -1502,6 +1524,7 @@ module.exports = {
   patchArchiveContracts,
   planArchivePlatform,
   executeArchivePlatforms,
+  findWindowsArchiveTargets,
   formatArchiveSummary,
   mayContainArchiveRouteContract,
   mayContainArchiveDataControlsContract,

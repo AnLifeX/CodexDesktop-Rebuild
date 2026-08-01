@@ -982,6 +982,17 @@ function listBundleFiles(directory) {
   return files;
 }
 
+function isVerificationSource(asarRoot, filePath) {
+  const relative = toPosix(path.relative(asarRoot, filePath));
+  if (relative === "package.json") return true;
+  if (/^\.vite\/build\/(?:early-bootstrap|preload|bootstrap(?:-[A-Za-z0-9_$-]+)?|main-.*)\.js$/.test(relative)) {
+    return true;
+  }
+  return /^webview\/assets\/(?:app-initial|app-shell|data-controls|use-service-tier-settings|read-service-tier-for-request|use-is-plugins-enabled)-.*\.js$/.test(
+    relative,
+  );
+}
+
 function inspectPackage(packagePath, expectedVersion) {
   if (!fs.existsSync(packagePath)) {
     return {
@@ -1051,7 +1062,12 @@ function verifyPatchedApp(root, platform, expectedVersion) {
 
   const sources = [];
   try {
-    for (const filePath of listBundleFiles(asarRoot)) {
+    const bundleFiles = listBundleFiles(asarRoot);
+    const limitToProductionCandidates = bundleFiles.length > 500;
+    for (const filePath of bundleFiles) {
+      if (limitToProductionCandidates && !isVerificationSource(asarRoot, filePath)) {
+        continue;
+      }
       sources.push({
         file: relativeEvidencePath(resolvedRoot, filePath),
         source: fs.readFileSync(filePath, "utf8"),
@@ -1074,6 +1090,7 @@ function verifyPatchedApp(root, platform, expectedVersion) {
       } else {
         contracts[definition.id] = inspection.files;
       }
+      if (typeof global.gc === "function") global.gc();
       continue;
     }
     if (definition.groups) {
@@ -1158,6 +1175,7 @@ function verifyPatchedApp(root, platform, expectedVersion) {
     } else {
       contracts[definition.id] = [...evidenceFiles].sort();
     }
+    if (typeof global.gc === "function") global.gc();
   }
 
   if (failures.length > 0) {

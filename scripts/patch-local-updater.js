@@ -1582,8 +1582,10 @@ function onlyValue(values, label) {
   return unique[0];
 }
 
-function analyzeWebviewMenuBarCode(code) {
-  const ast = acorn.parse(code, { ecmaVersion: "latest", sourceType: "module" });
+function analyzeWebviewMenuBarCode(
+  code,
+  ast = acorn.parse(code, { ecmaVersion: "latest", sourceType: "module" }),
+) {
   const initializers = new Map();
   const candidates = [];
   walkAst(ast, (node) => {
@@ -1723,8 +1725,10 @@ function makeModernWebviewTitlebarAttachment(shape, version = LOCAL_UPDATER_CONT
   )}\n${call}\n${WEBVIEW_DESCRIPTOR_END_MARKER}`;
 }
 
-function analyzeModernWebviewMenuBarCode(code) {
-  const ast = acorn.parse(code, { ecmaVersion: "latest", sourceType: "module" });
+function analyzeModernWebviewMenuBarCode(
+  code,
+  ast = acorn.parse(code, { ecmaVersion: "latest", sourceType: "module" }),
+) {
   const candidates = [];
   walkAst(ast, (node) => {
     if (node.type !== "FunctionDeclaration" || node.id?.type !== "Identifier") return;
@@ -1788,7 +1792,7 @@ function inspectModernUpdaterTitlebarSource(code, { allowLegacy = false } = {}) 
     throw new Error(`Windows modern updater component expected exactly 1 target, found ${functionCount}`);
   }
   const ast = parseJavaScript(code, "Windows modern updater titlebar", "module");
-  const shape = analyzeModernWebviewMenuBarCode(code);
+  const shape = analyzeModernWebviewMenuBarCode(code, ast);
   const componentRange = markerRange(
     code,
     WEBVIEW_COMPONENT_START_MARKER,
@@ -1880,9 +1884,9 @@ function inspectModernUpdaterTitlebarSource(code, { allowLegacy = false } = {}) 
   };
 }
 
-function patchModernWebviewMenuBarCode(code) {
+function planModernWebviewMenuBarPatch(code) {
   const shape = analyzeModernWebviewMenuBarCode(code);
-  const next = applyReplacements(code, [
+  return [
     {
       start: shape.rootChildren.end - 1,
       end: shape.rootChildren.end - 1,
@@ -1893,7 +1897,13 @@ function patchModernWebviewMenuBarCode(code) {
       end: shape.menuFunction.start,
       text: `${makeModernWebviewTitlebarComponent(shape)}\n`,
     },
-  ]);
+  ];
+}
+
+function patchModernWebviewMenuBarCode(code) {
+  const replacements = planModernWebviewMenuBarPatch(code);
+  if (typeof global.gc === "function") global.gc();
+  const next = applyReplacements(code, replacements);
   inspectModernUpdaterTitlebarSource(next);
   return next;
 }
@@ -2119,7 +2129,7 @@ function inspectUpdaterTitlebarSource(code, { allowLegacy = false } = {}) {
   }
 
   const ast = parseJavaScript(code, "Windows webview updater titlebar", "module");
-  const shape = analyzeWebviewMenuBarCode(code);
+  const shape = analyzeWebviewMenuBarCode(code, ast);
   const updaterDescriptors = [];
   walkAst(ast, (node) => {
     if (
@@ -2334,8 +2344,15 @@ function patchWebviewMenuBarCode(code) {
   ) {
     return patchModernWebviewMenuBarCode(code);
   }
+  const replacements = planLegacyWebviewMenuBarPatch(code);
+  const next = applyReplacements(code, replacements);
+  validateUpdaterTitlebarSource(next);
+  return next;
+}
+
+function planLegacyWebviewMenuBarPatch(code) {
   const shape = analyzeWebviewMenuBarCode(code);
-  const next = applyReplacements(code, [
+  return [
     {
       start: shape.menuArray.end - 1,
       end: shape.menuArray.end - 1,
@@ -2346,9 +2363,7 @@ function patchWebviewMenuBarCode(code) {
       end: shape.menuFunction.end,
       text: bindWebviewMenuBarPatch(makeWebviewMenuBarFunctionPatch(), shape),
     },
-  ]);
-  validateUpdaterTitlebarSource(next);
-  return next;
+  ];
 }
 
 function normalizeAsarPath(value) {
@@ -3088,8 +3103,6 @@ function selectTitlebarTarget(normalizedFiles) {
       source.includes("application-menu-content");
     if (!isLegacy && !isModern) continue;
     try {
-      if (isModern) analyzeModernWebviewMenuBarCode(source);
-      else analyzeWebviewMenuBarCode(source);
       candidates.push({ path: fileName, code: patchWebviewMenuBarCode(source) });
     } catch {
       // Other app-shell chunks may mention menu messages without rendering the titlebar.
@@ -3157,6 +3170,7 @@ function planLocalUpdaterSources({ packageSource, files, updateUrl = DEFAULT_WIN
   for (const output of outputs) {
     if (output.path !== "package.json") plannedFiles[output.path] = output.result.code;
   }
+  if (typeof global.gc === "function") global.gc();
   const validation = validateLocalUpdaterSources({
     packageSource: metadata.code,
     files: plannedFiles,
