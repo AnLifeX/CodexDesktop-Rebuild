@@ -20,7 +20,43 @@ function loadPatchModule() {
   return sandbox.module.exports;
 }
 
-const { COMMAND_TITLE_TRANSLATIONS, locateTargets, patchSource } = loadPatchModule();
+const {
+  COMMAND_TITLE_TRANSLATIONS,
+  NATIVE_MENU_MESSAGE_TRANSLATIONS,
+  locateTargets,
+  patchSource,
+} = loadPatchModule();
+
+{
+  const descriptors = NATIVE_MENU_MESSAGE_TRANSLATIONS
+    .filter(([messageId]) => messageId !== "codex.aboutDialog.title")
+    .map(
+      ([messageId, from]) =>
+        `{label:intl.formatMessage({messageId:\`${messageId}\`,defaultMessage:\`${from}\`})}`,
+    );
+  const source = [
+    `var titleId=\`codex.aboutDialog.title\`,titleDefault=\`About {appName}\`;`,
+    `const menu=[${descriptors.join("")}];`,
+    "const decoys=[`Undo`,`Task Manager`,`Quit {appName}`,`About {appName}`];",
+  ].join("");
+  const first = patchSource(source);
+
+  assert.strictEqual(
+    first.replacements.filter((item) => item.key === "nativeMessage").length,
+    NATIVE_MENU_MESSAGE_TRANSLATIONS.length,
+  );
+  for (const [messageId, , to] of NATIVE_MENU_MESSAGE_TRANSLATIONS) {
+    assert.ok(first.code.includes(to), `missing native message translation: ${messageId}`);
+  }
+  assert.ok(
+    first.code.includes("const decoys=[`Undo`,`Task Manager`,`Quit {appName}`,`About {appName}`]"),
+    "unscoped native-menu defaults must not be replaced",
+  );
+
+  const second = patchSource(first.code);
+  assert.strictEqual(second.code, first.code);
+  assert.strictEqual(second.replacements.length, 0);
+}
 
 {
   const commandObjects = COMMAND_TITLE_TRANSLATIONS.map(

@@ -35,6 +35,21 @@ const DIRECT_LITERAL_TRANSLATIONS = [
   ["Uploading Trace…", "正在上传跟踪..."],
   ["System Status", "系统状态"],
 ];
+const NATIVE_MENU_MESSAGE_TRANSLATIONS = [
+  ["codex.aboutDialog.title", "About {appName}", "关于 {appName}"],
+  ["electron.appMenu.app.quit", "Quit {appName}", "退出 {appName}"],
+  ["electron.appMenu.edit.undo", "Undo", "撤销"],
+  ["electron.appMenu.edit.redo", "Redo", "重做"],
+  ["electron.appMenu.edit.cut", "Cut", "剪切"],
+  ["electron.appMenu.edit.copy", "Copy", "复制"],
+  ["electron.appMenu.edit.paste", "Paste", "粘贴"],
+  ["electron.appMenu.edit.delete", "Delete", "删除"],
+  ["electron.appMenu.edit.selectAll", "Select All", "全选"],
+  ["electron.appMenu.view.actualSize", "Actual Size", "实际大小"],
+  ["electron.appMenu.view.toggleFullScreen", "Toggle Full Screen", "切换全屏"],
+  ["electron.appMenu.help.troubleshooting", "Troubleshooting", "故障排查"],
+  ["electron.appMenu.help.taskManager", "Task Manager", "任务管理器"],
+];
 const TRAY_MESSAGE_TRANSLATIONS = [
   ["trayMenu.openApp", "Open {appName}", "打开 {appName}"],
   ["trayMenu.newChat", "New Task", "新建任务"],
@@ -370,12 +385,40 @@ function patchCommandTitleDefaults(code, replacements) {
   return code;
 }
 
+function patchNativeMenuMessageDefaults(code, replacements) {
+  const identifierPattern = "(?<![A-Za-z0-9_$])[A-Za-z_$][\\w$]*";
+  for (const [messageId, from, to] of NATIVE_MENU_MESSAGE_TRANSLATIONS) {
+    const idPattern = jsStringLiteralVariants(messageId).map(escapeRegex).join("|");
+    const defaultPattern = jsStringLiteralVariants(from).map(escapeRegex).join("|");
+    const patterns = [
+      new RegExp(
+        `(${identifierPattern}\\s*=\\s*(?:${idPattern})\\s*,\\s*` +
+          `${identifierPattern}\\s*=\\s*)(?:${defaultPattern})`,
+        "g",
+      ),
+      new RegExp(
+        `(\\bmessageId\\s*:\\s*(?:${idPattern})\\s*,\\s*` +
+          `\\bdefaultMessage\\s*:\\s*)(?:${defaultPattern})`,
+        "g",
+      ),
+    ];
+    for (const pattern of patterns) {
+      code = code.replace(pattern, (match, prefix) => {
+        replacements.push({ key: "nativeMessage", from, to, messageId });
+        return `${prefix}${templateLiteral(to)}`;
+      });
+    }
+  }
+  return code;
+}
+
 function patchSource(source) {
   let code = source;
   const replacements = [];
 
   code = patchCommandTitleDefaults(code, replacements);
   code = patchTrayMessageDefaults(code, replacements);
+  code = patchNativeMenuMessageDefaults(code, replacements);
 
   for (const [from, to] of MENU_LABEL_TRANSLATIONS) {
     for (const literal of jsStringLiteralVariants(from)) {
@@ -543,4 +586,9 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { COMMAND_TITLE_TRANSLATIONS, patchSource, locateTargets };
+module.exports = {
+  COMMAND_TITLE_TRANSLATIONS,
+  NATIVE_MENU_MESSAGE_TRANSLATIONS,
+  patchSource,
+  locateTargets,
+};
