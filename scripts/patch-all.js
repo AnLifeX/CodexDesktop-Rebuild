@@ -22,7 +22,6 @@ const PATCHES = [
   "patch-devtools.js",
   "patch-fast-mode.js",
   "patch-plugin-auth.js",
-  "patch-owl-multi-browser.js",
   "patch-windows-native-paths.js",
   "patch-computer-use-win10.js",
   "patch-computer-use-win10-fallback.js",
