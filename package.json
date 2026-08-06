@@ -1,7 +1,7 @@
 {
   "name": "codex-rebuild",
   "productName": "Codex",
-  "version": "26.727.51351",
+  "version": "26.730.61639",
   "description": "Codex Electron App - Cross-platform Build",
   "main": "src/.vite/build/bootstrap.js",
   "scripts": {
@@ -76,11 +76,11 @@
     "https://ghproxy.net/"
   ],
   "optionalDependencies": {
-    "@openai/codex": "0.146.0-alpha.9.2"
+    "@openai/codex": "0.147.0-alpha.1.2"
   },
-  "codexRebuildOfficialVersion": "26.727.51351",
+  "codexRebuildOfficialVersion": "26.730.61639",
   "codexRebuildRevision": 0,
-  "codexRebuildReleaseVersion": "26.727.51351",
-  "codexRebuildPackageVersion": "26.727.51351",
-  "codexRebuildWindowsMsixVersion": "26.727.6591.0"
+  "codexRebuildReleaseVersion": "26.730.61639",
+  "codexRebuildPackageVersion": "26.730.61639",
+  "codexRebuildWindowsMsixVersion": "26.730.8199.0"
 }
