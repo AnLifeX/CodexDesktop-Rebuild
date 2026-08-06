@@ -2,7 +2,7 @@
 /**
  * Keep the bundled Windows Computer Use helper compatible with Windows 10.
  *
- * @oai/sky 0.5.2 queries the optional GraphicsCaptureSession interface that
+ * The @oai/sky Windows helper queries the optional GraphicsCaptureSession interface that
  * owns IsBorderRequired before every screenshot. That interface was added in
  * Windows 10 build 20348, so Windows 10 22H2 (19045) returns E_NOINTERFACE and
  * the helper aborts an otherwise supported Windows.Graphics.Capture session.

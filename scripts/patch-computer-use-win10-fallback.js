@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Add a GDI/PrintWindow screenshot fallback to the bundled Computer Use plugin.
+ * Add a GDI/PrintWindow screenshot fallback to the bundled Computer Use runtime.
  *
  * Windows.Graphics.Capture can successfully create a session on some Windows
- * 10 systems but never deliver its first frame. The plugin-side fallback avoids
+ * 10 systems but never deliver its first frame. The runtime-side fallback avoids
  * that path on legacy builds and is also used for known native capture failures
  * on newer Windows versions.
  */
@@ -18,40 +18,76 @@ const FALLBACK_MODULE_SOURCE = path.join(
   "windows-legacy-screenshot-fallback.mjs",
 );
 const CAPTURE_HELPER_SOURCE = path.join(ASSET_DIR, "CodexGdiCapture.cs");
-const DEFAULT_PLUGIN_ROOT = path.join(
+const DEFAULT_RUNTIME_PACKAGE_ROOT = path.join(
   SRC_DIR,
   "win",
-  "plugins",
-  "openai-bundled",
-  "plugins",
-  "computer-use",
+  "cua_node",
+  "bin",
+  "node_modules",
+  "@oai",
+  "sky",
+);
+const RUNTIME_CLIENT_RELATIVE_PATH = path.join(
+  "dist",
+  "project",
+  "cua",
+  "sky_js",
+  "src",
+  "targets",
+  "windows",
+  "internal",
+  "computer_use_client.js",
+);
+const RUNTIME_HELPER_RELATIVE_PATH = path.join(
+  "bin",
+  "windows",
+  "codex-gdi-capture.exe",
 );
 const CLIENT_IMPORT =
-  'import { installWindowsLegacyScreenshotFallback } from "./windows-legacy-screenshot-fallback.mjs";';
-const CLIENT_CONSTRUCTOR = `  constructor(options) {
-    super(options);
-    installWindowsLegacyScreenshotFallback(this);
-  }
+  'import{installWindowsLegacyScreenshotFallback}from"./windows-legacy-screenshot-fallback.mjs";';
+const CLIENT_INSTALL_CALL = "installWindowsLegacyScreenshotFallback(this)";
+const RUNTIME_HELPER_IMPORT_PATH = "../../../../../../../../bin/windows/codex-gdi-capture.exe";
 
-`;
+function runtimeClientPath(packageRoot = DEFAULT_RUNTIME_PACKAGE_ROOT) {
+  return path.join(packageRoot, RUNTIME_CLIENT_RELATIVE_PATH);
+}
+
+function runtimeHelperPath(packageRoot = DEFAULT_RUNTIME_PACKAGE_ROOT) {
+  return path.join(packageRoot, RUNTIME_HELPER_RELATIVE_PATH);
+}
+
+function runtimeFallbackModuleSource() {
+  const source = fs.readFileSync(FALLBACK_MODULE_SOURCE, "utf8");
+  const anchor =
+    'new URL("../bin/windows/codex-gdi-capture.exe", import.meta.url)';
+  if (!source.includes(anchor)) {
+    throw new Error("Computer Use fallback helper path anchor changed");
+  }
+  return source.replace(
+    anchor,
+    `new URL(${JSON.stringify(RUNTIME_HELPER_IMPORT_PATH)}, import.meta.url)`,
+  );
+}
 
 function patchClientSource(source) {
   let result = source;
   if (!result.includes(CLIENT_IMPORT)) {
-    const anchor = 'import { pathToFileURL } from "node:url";';
+    const anchor = 'from"./computer_use_client_base.js";';
     if (!result.includes(anchor)) {
-      throw new Error("Computer Use client URL import anchor changed");
+      throw new Error("Computer Use runtime import anchor changed");
     }
-    result = result.replace(anchor, `${anchor}\n${CLIENT_IMPORT}`);
+    result = result.replace(anchor, `${anchor}${CLIENT_IMPORT}`);
   }
 
-  if (!result.includes("installWindowsLegacyScreenshotFallback(this);")) {
-    const anchor =
-      /(class NativePipeComputerUseClient extends WindowsComputerUseClientBase \{\r?\n)/;
+  if (!result.includes(CLIENT_INSTALL_CALL)) {
+    const anchor = /super\(\{transport:[^}]+\}\),/;
     if (!anchor.test(result)) {
-      throw new Error("Computer Use native client class anchor changed");
+      throw new Error("Computer Use runtime constructor anchor changed");
     }
-    result = result.replace(anchor, `$1${CLIENT_CONSTRUCTOR}`);
+    result = result.replace(
+      anchor,
+      (match) => `${match}installWindowsLegacyScreenshotFallback(this),`,
+    );
   }
   return result;
 }
@@ -103,28 +139,23 @@ function compileCaptureHelper(
   );
 }
 
-function installFallback(pluginRoot, options = {}) {
-  const clientPath = path.join(pluginRoot, "scripts", "computer-use-client.mjs");
+function installFallback(runtimePackageRoot = DEFAULT_RUNTIME_PACKAGE_ROOT, options = {}) {
+  const clientPath = runtimeClientPath(runtimePackageRoot);
   if (!fs.existsSync(clientPath)) {
-    throw new Error(`Computer Use client is missing: ${clientPath}`);
+    throw new Error(`Computer Use runtime client is missing: ${clientPath}`);
   }
+
   const original = fs.readFileSync(clientPath, "utf8");
   const patched = patchClientSource(original);
   const modulePath = path.join(
-    pluginRoot,
-    "scripts",
+    path.dirname(clientPath),
     "windows-legacy-screenshot-fallback.mjs",
   );
-  const helperPath = path.join(
-    pluginRoot,
-    "bin",
-    "windows",
-    "codex-gdi-capture.exe",
-  );
+  const helperPath = runtimeHelperPath(runtimePackageRoot);
 
   if (!options.check) {
     if (patched !== original) fs.writeFileSync(clientPath, patched);
-    fs.copyFileSync(FALLBACK_MODULE_SOURCE, modulePath);
+    fs.writeFileSync(modulePath, runtimeFallbackModuleSource());
     (options.compileCaptureHelper ?? compileCaptureHelper)(helperPath);
   }
   return {
@@ -135,11 +166,11 @@ function installFallback(pluginRoot, options = {}) {
   };
 }
 
-function parsePluginRoot(args) {
-  const index = args.indexOf("--plugin-root");
-  if (index === -1) return DEFAULT_PLUGIN_ROOT;
+function parseRuntimePackageRoot(args) {
+  const index = args.indexOf("--runtime-package-root");
+  if (index === -1) return DEFAULT_RUNTIME_PACKAGE_ROOT;
   const value = args[index + 1];
-  if (!value) throw new Error("--plugin-root requires a path");
+  if (!value) throw new Error("--runtime-package-root requires a path");
   return path.resolve(value);
 }
 
@@ -153,16 +184,18 @@ function main() {
     return;
   }
 
-  const pluginRoot = parsePluginRoot(args);
-  if (!fs.existsSync(pluginRoot)) {
+  const runtimePackageRoot = parseRuntimePackageRoot(args);
+  if (!fs.existsSync(runtimePackageRoot)) {
     if (platform === "win") {
-      throw new Error(`Computer Use plugin is missing: ${pluginRoot}`);
+      throw new Error(`Computer Use runtime is missing: ${runtimePackageRoot}`);
     }
-    console.log(`  [ok] No Windows Computer Use plugin found at ${relPath(pluginRoot)}`);
+    console.log(
+      `  [ok] No Windows Computer Use runtime found at ${relPath(runtimePackageRoot)}`,
+    );
     return;
   }
 
-  const result = installFallback(pluginRoot, {
+  const result = installFallback(runtimePackageRoot, {
     check: args.includes("--check"),
   });
   const action = args.includes("--check")
@@ -184,11 +217,16 @@ if (require.main === module) {
 
 module.exports = {
   CAPTURE_HELPER_SOURCE,
-  CLIENT_CONSTRUCTOR,
   CLIENT_IMPORT,
   FALLBACK_MODULE_SOURCE,
+  RUNTIME_CLIENT_RELATIVE_PATH,
+  RUNTIME_HELPER_IMPORT_PATH,
+  RUNTIME_HELPER_RELATIVE_PATH,
   compileCaptureHelper,
   findCSharpCompiler,
   installFallback,
   patchClientSource,
+  runtimeClientPath,
+  runtimeFallbackModuleSource,
+  runtimeHelperPath,
 };

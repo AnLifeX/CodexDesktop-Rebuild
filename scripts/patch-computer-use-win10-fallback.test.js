@@ -8,43 +8,47 @@ const { pathToFileURL } = require("node:url");
 const {
   CLIENT_IMPORT,
   FALLBACK_MODULE_SOURCE,
+  RUNTIME_HELPER_IMPORT_PATH,
   installFallback,
   patchClientSource,
+  runtimeFallbackModuleSource,
 } = require("./patch-computer-use-win10-fallback");
 
-function clientFixture() {
-  return `import { pathToFileURL } from "node:url";
-
-class NativePipeComputerUseClient extends WindowsComputerUseClientBase {
-  documentation(name) {
-    return readDocumentation(name);
-  }
-}
-`;
+function runtimeClientFixture() {
+  return [
+    'import{WindowsComputerUseClientBase as s}from"./computer_use_client_base.js";',
+    'class u extends s{constructor(t={}){const e={transport:t.transport};super({transport:e.transport}),p.set(this,null)}}',
+  ].join("");
 }
 
-test("patches the Computer Use client after instance arrow methods exist", () => {
-  const patched = patchClientSource(clientFixture());
-  assert.match(patched, new RegExp(CLIENT_IMPORT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(patched, /constructor\(options\) \{\s+super\(options\);\s+installWindowsLegacyScreenshotFallback\(this\);/);
-  assert.equal(patchClientSource(patched), patched, "client patch must be idempotent");
+test("patches the 26.730 @oai/sky runtime client", () => {
+  const patched = patchClientSource(runtimeClientFixture());
+  assert.ok(patched.includes(CLIENT_IMPORT));
+  assert.match(patched, /super\(\{transport:e\.transport\}\),installWindowsLegacyScreenshotFallback\(this\),/);
+  assert.equal(patchClientSource(patched), patched, "runtime patch must be idempotent");
 });
 
 test("fails closed when upstream Computer Use client anchors change", () => {
   assert.throws(
     () => patchClientSource("export default {};"),
-    /URL import anchor changed/,
+    /runtime import anchor changed/,
   );
 });
 
-test("installs the fallback module and capture helper in the plugin", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-cua-fallback-"));
-  const pluginRoot = path.join(root, "computer-use");
-  const scripts = path.join(pluginRoot, "scripts");
-  fs.mkdirSync(scripts, { recursive: true });
-  fs.writeFileSync(path.join(scripts, "computer-use-client.mjs"), clientFixture());
+test("installs the fallback module and helper beside the 26.730 runtime client", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-cua-runtime-fallback-"));
+  const runtimePackageRoot = path.join(root, "sky");
+  const runtimeClientPath = path.join(
+    runtimePackageRoot,
+    "dist/project/cua/sky_js/src/targets/windows/internal/computer_use_client.js",
+  );
+  fs.mkdirSync(path.dirname(runtimeClientPath), { recursive: true });
+  fs.writeFileSync(
+    runtimeClientPath,
+    runtimeClientFixture(),
+  );
   let compiledTarget = null;
-  const result = installFallback(pluginRoot, {
+  const result = installFallback(runtimePackageRoot, {
     compileCaptureHelper(target) {
       compiledTarget = target;
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -55,12 +59,16 @@ test("installs the fallback module and capture helper in the plugin", () => {
   assert.equal(compiledTarget, result.helperPath);
   assert.equal(
     fs.readFileSync(result.modulePath, "utf8"),
-    fs.readFileSync(FALLBACK_MODULE_SOURCE, "utf8"),
+    runtimeFallbackModuleSource(),
   );
-  assert.equal(fs.readFileSync(result.helperPath, "utf8"), "fixture");
   assert.match(
     fs.readFileSync(result.clientPath, "utf8"),
     /installWindowsLegacyScreenshotFallback\(this\)/,
+  );
+  assert.equal(fs.readFileSync(result.helperPath, "utf8"), "fixture");
+  assert.equal(
+    path.resolve(path.dirname(result.modulePath), RUNTIME_HELPER_IMPORT_PATH),
+    result.helperPath,
   );
 });
 
