@@ -50,7 +50,7 @@ test("Windows releases use official+rN codex-win tags and ZIP-only public assets
     );
     assert.match(text, /scripts\/windows-release-metadata\.js/);
     assert.match(text, /--write["', ]+out\/windows-release-metadata\.json/);
-    assert.match(text, /Codex-Windows-Release-Metadata-x64-/);
+    assert.match(text, /windows-release-metadata\.json/);
     const release = text.match(/uses: softprops\/action-gh-release@v3[\s\S]*?(?=\n\s+- name: Prepare Windows update feed|\n\s+- name: Publish Windows update feed)/)?.[0] || "";
     assert.match(release, /Codex-win-x64-.*\.zip/);
     assert.match(release, /CodexSetup-win-x64-.*\.zip/);
@@ -94,44 +94,43 @@ test("the manual workflow publishes Windows by default", () => {
   );
 });
 
-test("scheduled sync publishes directly while manual sync can choose draft or release", () => {
+test("scheduled sync publishes validated drafts while manual sync can leave drafts", () => {
   const workflow = workflows.find(({ name }) => name === "sync.yml").text;
-  const release = workflow.match(
-    /- name: Create Windows Release[\s\S]*?(?=\n\s+- name: Prepare Windows update feed)/,
-  )?.[0] || "";
 
   assert.match(
     workflow,
     /publish_release:\s*\n(?:\s+.*\n)*?\s+default: false/,
   );
+  assert.match(workflow, /name: Upload Windows assets to draft release/);
+  assert.match(workflow, /name: Upload Windows update feed to draft staging release/);
+  assert.match(workflow, /draft: true/);
   assert.match(
-    release,
-    /draft: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.publish_release != true \}\}/,
-  );
-  assert.match(
-    release,
-    /make_latest: \$\{\{ github\.event_name == 'schedule' \|\| inputs\.publish_release == true \}\}/,
+    workflow,
+    /if: needs\.check\.result == 'success' && needs\.check\.outputs\.windows_changed == 'true' && needs\.build-windows\.result == 'success' && \(github\.event_name == 'schedule' \|\| inputs\.publish_release == true\)/,
   );
   assert.match(
     workflow,
     /- name: Record built Windows versions\n\s+if: github\.event_name == 'schedule' \|\| inputs\.publish_release == true/,
   );
-  assert.match(
-    workflow,
-    /- name: Prepare Windows update feed\n\s+if: github\.event_name == 'schedule' \|\| inputs\.publish_release == true/,
-  );
-  assert.match(
-    workflow,
-    /- name: Publish Windows update feed\n\s+if: github\.event_name == 'schedule' \|\| inputs\.publish_release == true/,
-  );
-  assert.doesNotMatch(workflow, /name: Create draft Windows Release/);
+  assert.doesNotMatch(workflow, /Prepare Windows update feed\n/);
+  assert.doesNotMatch(workflow, /actions\/(?:upload|download)-artifact/);
+});
+
+test("Windows builds hand off through draft releases instead of Actions artifacts", () => {
+  for (const { name, text } of workflows) {
+    assert.doesNotMatch(text, /actions\/upload-artifact|actions\/download-artifact/, "${name} must not use Actions artifacts");
+    assert.match(text, /name: Upload Windows assets to draft release/);
+    assert.match(text, /name: Upload Windows update feed to draft staging release/);
+    assert.match(text, /tag_name: windows-update-feed-staging-/);
+    assert.match(text, /draft: true/);
+  }
 });
 
 test("manual and scheduled releases reject mutable or rollback feed state before committing", () => {
   for (const { name, text } of workflows) {
     const validateIndex = text.indexOf("name: Validate release metadata and monotonic state");
     const recordIndex = text.indexOf("name: Record built Windows versions");
-    const releaseIndex = text.search(/name: Create (?:draft )?Windows (?:GitHub )?Release/);
+    const releaseIndex = text.indexOf("name: Validate exact draft asset set");
     assert.ok(validateIndex !== -1, `${name} must validate remote release state`);
     assert.ok(validateIndex < recordIndex && recordIndex < releaseIndex);
     assert.match(text, /windows-release-metadata\.js \\\n\s+--metadata "\$metadata_file" \\\n\s+--validate-promotion/);

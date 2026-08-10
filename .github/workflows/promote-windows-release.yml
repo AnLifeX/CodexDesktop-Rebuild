@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: GitHub Actions run ID containing the Windows artifacts
+        description: GitHub Actions run ID that created the Windows draft releases
         required: true
         type: string
       release_version:
@@ -35,8 +35,8 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-r[1-9][0-9]*$ ]]; then
-            echo "Invalid release_version: expected X.Y.Z-rN" >&2
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-r[1-9][0-9]*)?$ ]]; then
+            echo "Invalid release_version: expected X.Y.Z or X.Y.Z-rN" >&2
             exit 1
           fi
           if [[ ! "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
@@ -56,37 +56,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download Windows installer
-        uses: actions/download-artifact@v7
-        with:
-          name: Codex-Windows-Installer-x64-${{ inputs.release_version }}
-          path: artifacts/installer
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Download Windows portable archive
-        uses: actions/download-artifact@v7
-        with:
-          name: Codex-Windows-Portable-x64-${{ inputs.release_version }}
-          path: artifacts/portable
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Download Windows update feed
-        uses: actions/download-artifact@v7
-        with:
-          name: Codex-Windows-UpdateFeed-x64
-          path: artifacts/update-feed
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Download Windows release metadata
-        uses: actions/download-artifact@v7
-        with:
-          name: Codex-Windows-Release-Metadata-x64-${{ inputs.release_version }}
-          path: artifacts/metadata
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
+      - name: Download Windows draft release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          release_tag="codex-win-$RELEASE_VERSION"
+          feed_staging_tag="windows-update-feed-staging-$RELEASE_VERSION"
+          mkdir -p artifacts/installer artifacts/portable artifacts/update-feed artifacts/metadata
+          gh release download "$release_tag" --dir artifacts/installer --pattern "CodexSetup-win-x64-$RELEASE_VERSION.zip" --clobber
+          gh release download "$release_tag" --dir artifacts/portable --pattern "Codex-win-x64-$RELEASE_VERSION.zip" --clobber
+          gh release download "$release_tag" --dir artifacts/metadata --pattern "windows-release-metadata.json" --clobber
+          gh release download "$feed_staging_tag" --dir artifacts/update-feed --pattern '*.nupkg' --pattern 'RELEASES' --clobber
+          release_json="$(gh release view "$release_tag" --json isDraft,assets)"
+          feed_json="$(gh release view "$feed_staging_tag" --json isDraft,assets)"
+          test "$(jq -r '.isDraft' <<<"$release_json")" = true
+          test "$(jq -r '.isDraft' <<<"$feed_json")" = true
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$SOURCE_RUN_ID")"
+          test "$(jq -r '.conclusion' <<<"$run_json")" = success
+          test "$(jq -r '.path' <<<"$run_json")" = ".github/workflows/build.yml"
 
       - name: Resolve Windows installer version
         id: installer_artifacts
@@ -185,34 +175,28 @@ jobs:
             echo "No Windows version metadata change"
           fi
 
-      - name: Create or update Windows-only release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: codex-win-${{ inputs.release_version }}
-          name: Codex Win ${{ inputs.release_version }}
-          target_commitish: master
-          body: |
-            Windows-only release promoted from GitHub Actions run `${{ inputs.source_run_id }}`.
-
-            - Official Codex version: `${{ steps.metadata.outputs.windows_internal_app_version }}`
-            - Rebuild revision: `r${{ steps.metadata.outputs.windows_rebuild_revision }}`
-            - Microsoft Store MSIX: `${{ steps.metadata.outputs.windows_upstream_version }}`
-            - Portable ZIP: `Codex-win-x64-${{ inputs.release_version }}.zip`
-            - Installer ZIP: `CodexSetup-win-x64-${{ inputs.release_version }}.zip`
-            - The installer executable is inside the ZIP to avoid direct `.exe` browser download blocking.
-            - Squirrel update packages are published separately to `windows-update-feed`.
-          files: |
-            artifacts/installer/CodexSetup-win-x64-${{ inputs.release_version }}.zip
-            artifacts/portable/Codex-win-x64-${{ inputs.release_version }}.zip
-          fail_on_unmatched_files: true
-          overwrite_files: true
-          draft: false
-          prerelease: false
-          make_latest: true
+      - name: Validate exact draft release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          release_tag="codex-win-$RELEASE_VERSION"
+          expected="$(printf '%s\n' \
+            "CodexSetup-win-x64-$RELEASE_VERSION.zip" \
+            "Codex-win-x64-$RELEASE_VERSION.zip" \
+            "windows-release-metadata.json" | sort)"
+          actual="$(gh release view "$release_tag" --json assets --jq '.assets[].name' | sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "Unexpected draft assets for $release_tag" >&2
+            diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") >&2 || true
+            exit 1
+          fi
 
       - name: Publish Windows update feed
         env:
           GH_TOKEN: ${{ github.token }}
+          FEED_STAGING_TAG: windows-update-feed-staging-${{ inputs.release_version }}
         run: |
           set -euo pipefail
           tag="$WINDOWS_UPDATE_TAG"
@@ -231,6 +215,24 @@ jobs:
               gh release delete-asset "$tag" "$asset" -y
             fi
           done
+          gh release delete "$FEED_STAGING_TAG" --cleanup-tag --yes
+
+      - name: Remove metadata asset before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: codex-win-${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
+          asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate --jq '.[] | select(.name == "windows-release-metadata.json") | .id' | head -n 1)"
+          test -n "$asset_id"
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+
+      - name: Publish Windows draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: codex-win-${{ inputs.release_version }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
 
       - name: Reconcile exact release assets
         env:
