@@ -431,13 +431,17 @@ jobs:
         id: artifacts
         run: node scripts/resolve-release-artifacts.js --root artifacts --github-output
 
+      - name: Resolve Windows full package version
+        id: package_artifacts
+        run: node scripts/resolve-release-artifacts.js --root update-feed --github-output
+
       - name: Validate exact Windows release assets
         env:
           EXPECTED_VERSION: ${{ needs.build-windows.outputs.windows_release_version }}
           EXPECTED_PACKAGE_VERSION: ${{ needs.build-windows.outputs.windows_package_version }}
           PORTABLE_VERSION: ${{ steps.artifacts.outputs.windows_portable_version }}
           INSTALLER_VERSION: ${{ steps.artifacts.outputs.windows_installer_version }}
-          PACKAGE_VERSION: ${{ steps.artifacts.outputs.windows_package_version }}
+          PACKAGE_VERSION: ${{ steps.package_artifacts.outputs.windows_package_version }}
         run: |
           set -euo pipefail
           test "$PORTABLE_VERSION" = "$EXPECTED_VERSION"
