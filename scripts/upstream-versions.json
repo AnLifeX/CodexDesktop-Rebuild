@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-07T10:18:52.254Z",
+  "updatedAt": "2026-08-13T06:59:35.268Z",
   "platforms": {
     "macOS-arm64": {
       "version": "26.707.62119",
@@ -10,12 +10,12 @@
       "build": "5211"
     },
     "Windows": {
-      "version": "26.803.41515",
-      "internalAppVersion": "26.803.41515",
-      "msixVersion": "26.803.5235.0",
+      "version": "26.803.81509",
+      "internalAppVersion": "26.803.81509",
+      "msixVersion": "26.803.10989.0",
       "rebuildRevision": 0,
-      "releaseVersion": "26.803.41515",
-      "packageVersion": "26.803.41515",
+      "releaseVersion": "26.803.81509",
+      "packageVersion": "26.803.81509",
       "build": ""
     }
   }
