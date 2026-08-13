@@ -21,6 +21,15 @@ const { normalizeEscapedResourcePaths } = require("./windows-resource-paths");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const INITIAL_TMPDIR = os.tmpdir();
+const SKY_JS_DEPENDENCY_CACHE = path.join(
+  "cua_node",
+  "bin",
+  "node_modules",
+  "@oai",
+  "sky",
+  "dist",
+  "js-dependency-cache",
+);
 
 function run(command, args, options = {}) {
   execFileSync(command, args, {
@@ -51,6 +60,17 @@ function clearDirectoryContents(dir) {
       fs.rmSync(entryPath, { recursive: true, force: true });
     }
   }
+}
+
+function removeSkyJsDependencyCache(resourcesDir) {
+  const dependencyCache = path.join(resourcesDir, SKY_JS_DEPENDENCY_CACHE);
+  if (!fs.existsSync(dependencyCache)) return false;
+
+  // This cache is a build artifact; the production bundle has no imports from
+  // it. Its generated hash directory can exceed NuGet's legacy MAX_PATH limit
+  // once staged by Squirrel.Windows.
+  fs.rmSync(dependencyCache, { recursive: true, force: true });
+  return true;
 }
 
 function resetShortWorkspace(root) {
@@ -178,6 +198,10 @@ function applyPatchedResources(appDirectory, primaryExe) {
       `-- decoded ${normalizedPaths.total} escaped resource names ` +
         `(${normalizedPaths.directories} directories, ${normalizedPaths.files} files)`,
     );
+  }
+
+  if (removeSkyJsDependencyCache(resourcesDir)) {
+    console.log("-- removed @oai/sky build dependency cache from installer staging");
   }
 
   const newHash = computeAsarHeaderHash(destAsar);
