@@ -23,7 +23,11 @@ function writeRel32(buffer, instructionOffset, instructionRva, targetRva) {
   buffer.writeInt32LE(targetRva - (instructionRva + 5), instructionOffset + 1);
 }
 
-function createFixture({ duplicateMarker = false, corruptQuery = false } = {}) {
+function createFixture({
+  duplicateMarker = false,
+  corruptQuery = false,
+  contextRegister = 0xc6,
+} = {}) {
   const buffer = Buffer.alloc(0xc00);
   buffer.write("MZ", 0, "ascii");
   buffer.writeUInt32LE(0x80, 0x3c);
@@ -98,7 +102,7 @@ function createFixture({ duplicateMarker = false, corruptQuery = false } = {}) {
     0x90,
     0x48,
     0x89,
-    0xc6,
+    contextRegister,
     0x48,
     0x85,
     0xc0,
@@ -138,6 +142,11 @@ test("patches only the optional border-interface E_NOINTERFACE path", () => {
   assert.deepEqual(second.buffer, result.buffer);
 });
 
+test("accepts the current runtime's alternate error-context register allocation", () => {
+  const result = patchComputerUseBuffer(createFixture({ contextRegister: 0xc3 }));
+  assert.equal(result.status, "patched");
+});
+
 test("fails closed when the helper markers or QI instructions change", () => {
   assert.throws(
     () => patchComputerUseBuffer(createFixture({ duplicateMarker: true })),
@@ -146,6 +155,10 @@ test("fails closed when the helper markers or QI instructions change", () => {
   assert.throws(
     () => patchComputerUseBuffer(createFixture({ corruptQuery: true })),
     /Expected one optional border QI result sequence, found 0/,
+  );
+  assert.throws(
+    () => patchComputerUseBuffer(createFixture({ contextRegister: 0xc7 })),
+    /SetIsBorderRequired error context instructions changed/,
   );
 });
 
