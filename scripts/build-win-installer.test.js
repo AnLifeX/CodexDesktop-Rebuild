@@ -33,7 +33,7 @@ function loadInstallerInternals() {
   const filename = path.join(__dirname, "build-win-installer.js");
   const isolatedSource = source.replace(
     /main\(\)\.catch\(\(error\) => \{[\s\S]*?\n\}\);\s*$/,
-    "module.exports = { createLegacyExecutableAlias, markSquirrelAware, resolvePrimaryExecutableNameFromManifest, resolveSquirrelReleaseOptions };\n",
+    "module.exports = { createLegacyExecutableAlias, markSquirrelAware, removeSkyJsDependencyCache, resolvePrimaryExecutableNameFromManifest, resolveSquirrelReleaseOptions };\n",
   );
   const module = { exports: {} };
   vm.runInNewContext(isolatedSource, {
@@ -235,6 +235,32 @@ function assertRequiredDeltaWindowsInstallerWorkflow(workflow, { supportsSkip })
   assert.ok(deltaIndex < verifyIndex && verifyIndex < resolveIndex);
   assert.doesNotMatch(workflow, /Back up guaranteed full Windows installer|Finalize Windows installer output/);
 }
+
+test("removes only the upstream Sky dependency cache from installer staging", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-sky-cache-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cache = path.join(
+    root,
+    "cua_node",
+    "bin",
+    "node_modules",
+    "@oai",
+    "sky",
+    "dist",
+    "js-dependency-cache",
+  );
+  const keep = path.join(root, "cua_node", "bin", "keep.txt");
+  fs.mkdirSync(cache, { recursive: true });
+  fs.mkdirSync(path.dirname(keep), { recursive: true });
+  fs.writeFileSync(path.join(cache, "cache.js"), "cache");
+  fs.writeFileSync(keep, "keep");
+
+  const { removeSkyJsDependencyCache } = loadInstallerInternals();
+  assert.equal(removeSkyJsDependencyCache(root), true);
+  assert.equal(fs.existsSync(cache), false);
+  assert.equal(fs.readFileSync(keep, "utf8"), "keep");
+  assert.equal(removeSkyJsDependencyCache(root), false);
+});
 
 test("Windows release workflows require delta output with a one-hour bound", () => {
   const buildWorkflow = fs.readFileSync(
