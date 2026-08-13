@@ -141,13 +141,19 @@ function validateErrorContextTrailer(buffer, xrefOffset) {
     [16, 0x90],
     [17, 0x48],
     [18, 0x89],
-    [19, 0xc6],
     [20, 0x48],
     [21, 0x85],
     [22, 0xc0],
     [23, 0x75],
   ];
   if (fixed.some(([relative, byte]) => buffer[xrefOffset + relative] !== byte)) {
+    throw new Error("SetIsBorderRequired error context instructions changed");
+  }
+  // Rust's register allocation changed between the previous and current
+  // Computer Use runtimes (`mov rsi, rax` -> `mov rbx, rax`).  The register
+  // itself is not part of the compatibility patch; keep validating the
+  // instruction shape while accepting both known encodings.
+  if (![0xc3, 0xc6].includes(buffer[xrefOffset + 19])) {
     throw new Error("SetIsBorderRequired error context instructions changed");
   }
   return xrefOffset + 25;
