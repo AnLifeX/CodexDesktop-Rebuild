@@ -126,6 +126,17 @@ test("Windows builds hand off through draft releases instead of Actions artifact
   }
 });
 
+test("release jobs resolve Squirrel package versions from the update-feed directory", () => {
+  for (const { name, text } of workflows) {
+    assert.match(text, /resolve-release-artifacts\.js --root artifacts --github-output/);
+    assert.match(text, /resolve-release-artifacts\.js --root update-feed --github-output/);
+    assert.match(
+      text,
+      /PACKAGE_VERSION: \$\{\{ steps\.package_artifacts\.outputs\.windows_package_version \}\}/,
+    );
+  }
+});
+
 test("manual and scheduled releases reject mutable or rollback feed state before committing", () => {
   for (const { name, text } of workflows) {
     const validateIndex = text.indexOf("name: Validate release metadata and monotonic state");
