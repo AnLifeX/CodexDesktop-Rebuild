@@ -862,6 +862,9 @@ function inspectSharedArchiveContract(sources) {
       ({ source }) =>
         source.includes("archive-conversation") ||
         source.includes("delete-archived-conversation") ||
+        source.includes("delete-archived-thread") ||
+        source.includes("delete-all-archived-threads") ||
+        source.includes("deleteArchivedConversation") ||
         source.includes("delete-conversation"),
     );
     const plan = planArchivePlatform({

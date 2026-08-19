@@ -193,8 +193,8 @@ test("translation specs cover the confirmed visible UI gaps", () => {
       "访问网站、发送数据以及使用已启用的插件",
     ],
     [
-      "composer.mode.agentMode.fullAccessConfirm.riskDescription",
-      "这可能带来敏感数据丢失或泄露、提示词注入等风险。你可以随时关闭此功能。<link>了解更多</link>",
+      "composer.mode.agentMode.fullAccessConfirm.riskDescriptionByModel",
+      "这会带来敏感数据丢失或泄露、提示词注入等风险。{isCyberModel, select, true {我们强烈建议改选“替我批准”，并根据你的使用场景自定义审核者策略。} other {你可以随时关闭此功能。}} <link>了解更多</link>",
     ],
   ]);
   const assetsDir = path.join(

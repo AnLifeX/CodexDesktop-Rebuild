@@ -619,8 +619,100 @@ function isLiveArchiveRouter(ast, ancestors, reachability) {
   return consumers.length === 1;
 }
 
+function isThisArchiveMember(node, name) {
+  return (
+    node?.type === "MemberExpression" &&
+    !node.computed &&
+    node.object?.type === "ThisExpression" &&
+    node.property?.name === name
+  );
+}
+
+function nativeArchiveManagerMethodIsValid(method, route, includesThreadId) {
+  const fn = method?.value;
+  if (
+    method?.type !== "MethodDefinition" ||
+    fn?.type !== "FunctionExpression" ||
+    fn.async !== true ||
+    fn.params.length !== (includesThreadId ? 1 : 0) ||
+    (includesThreadId && fn.params[0]?.type !== "Identifier")
+  ) return false;
+  const threadId = includesThreadId ? fn.params[0].name : null;
+  let deletedBinding = null;
+  const fetchCalls = [];
+  const deletionCalls = [];
+  const returns = [];
+  walkArchive(fn.body, (node) => {
+    if (node.type === "VariableDeclarator" && node.id?.type === "ObjectPattern") {
+      const deleted = node.id.properties.find(
+        (property) => archivePropertyName(property) === "deletedThreadIds",
+      );
+      if (deleted?.value?.type === "Identifier") deletedBinding = deleted.value.name;
+    }
+    if (node.type === "CallExpression" && isThisArchiveMember(node.callee, "fetchFromHost")) {
+      fetchCalls.push(node);
+    }
+    if (
+      node.type === "CallExpression" &&
+      isThisArchiveMember(node.callee, "handleThreadDeletion")
+    ) deletionCalls.push(node);
+    if (node.type === "ReturnStatement") returns.push(node);
+  });
+  if (!deletedBinding || fetchCalls.length !== 1 || deletionCalls.length !== 1 || returns.length !== 1) {
+    return false;
+  }
+  const fetch = fetchCalls[0];
+  if (archiveLiteral(fetch.arguments[0]) !== route) return false;
+  const params = archiveObjectProperty(fetch.arguments[1], "params")?.value;
+  const hostId = archiveObjectProperty(params, "hostId")?.value;
+  if (!isThisArchiveMember(hostId, "hostId")) return false;
+  const requestThreadId = archiveObjectProperty(params, "threadId")?.value;
+  if (
+    includesThreadId
+      ? requestThreadId?.type !== "Identifier" || requestThreadId.name !== threadId
+      : requestThreadId != null
+  ) return false;
+  const deletion = deletionCalls[0];
+  if (
+    deletion.arguments.length !== 1 ||
+    deletion.arguments[0]?.type !== "Identifier" ||
+    deletion.arguments[0].name !== deletedBinding
+  ) return false;
+  const returned = returns[0].argument;
+  const finalExpression = returned?.type === "SequenceExpression"
+    ? returned.expressions.at(-1)
+    : returned;
+  return finalExpression?.type === "Identifier" && finalExpression.name === deletedBinding;
+}
+
+function nativeArchiveManagerEvidence(ast) {
+  const candidates = [];
+  const relevantMethods = [];
+  walkArchive(ast, (node) => {
+    if (node.type !== "ClassBody") return;
+    const single = node.body.filter(
+      (item) => item.type === "MethodDefinition" && item.key?.name === "deleteArchivedConversation",
+    );
+    const all = node.body.filter(
+      (item) => item.type === "MethodDefinition" && item.key?.name === "deleteAllArchivedConversations",
+    );
+    relevantMethods.push(...single, ...all);
+    if (
+      single.length === 1 &&
+      all.length === 1 &&
+      nativeArchiveManagerMethodIsValid(single[0], "delete-archived-thread", true) &&
+      nativeArchiveManagerMethodIsValid(all[0], "delete-all-archived-threads", false)
+    ) candidates.push(node);
+  });
+  if (relevantMethods.length > 0 && candidates.length !== 1) {
+    throw new Error("native archive manager API evidence is detached or structurally malformed");
+  }
+  return candidates.length === 1;
+}
+
 function inspectArchiveAppMainSource(source) {
   const ast = parseArchiveSource(source, "archive app-main");
+  const hasNativeManagerApi = nativeArchiveManagerEvidence(ast);
   const reachability = createArchiveReachability(ast);
   const properties = { native: [], legacy: [] };
   const tokens = { native: 0, legacy: 0 };
@@ -714,6 +806,7 @@ function inspectArchiveAppMainSource(source) {
     if (legacy.length !== 1) throw new Error(`legacy archive route expected exactly 1 target, found ${legacy.length}`);
     return { mode: "legacy", status: "already" };
   }
+  if (hasNativeManagerApi) return { mode: "native-api", status: "native" };
   return null;
 }
 
@@ -754,7 +847,9 @@ function patchAppMainSource(source) {
       counts:
         inspection.mode === "combined"
           ? combinedArchiveRouteCount(0, 1)
-          : archiveCount(0, 1, 0, "archive route"),
+          : inspection.mode === "native-api"
+            ? archiveCount(0, 0, 1, "archive route")
+            : archiveCount(0, 1, 0, "archive route"),
     };
   }
 
@@ -911,6 +1006,16 @@ function nativeArchiveThreadDetail(entry) {
   return entry;
 }
 
+function nativeArchiveManagerCallDetail(entry) {
+  const { call } = entry;
+  if (call.callee?.type !== "MemberExpression") return null;
+  const method = call.callee.property?.name ?? archiveLiteral(call.callee.property);
+  if (!["deleteArchivedConversation", "deleteAllArchivedConversations"].includes(method)) {
+    return null;
+  }
+  return { ...entry, method };
+}
+
 function isDirectNativeArchiveFunction(fn) {
   const evidence = collectExecutableArchiveEvidence(fn);
   const routes = evidence.calls.map(nativeArchiveRouteDetail).filter(Boolean);
@@ -988,10 +1093,16 @@ function isLiveNativeArchiveMutation(fn) {
     if (consumed.length !== 1) return false;
     const mutationEvidence = collectExecutableArchiveEvidence(mutationFunction);
     const routes = mutationEvidence.calls.map(nativeArchiveRouteDetail).filter(Boolean);
-    if (
-      routes.length !== 2 ||
-      routes.some((route) => route.callee !== routes[0].callee)
-    ) return false;
+    const managerCalls = mutationEvidence.calls
+      .map(nativeArchiveManagerCallDetail)
+      .filter(Boolean);
+    const hasLegacyNativeCalls =
+      routes.length === 2 &&
+      routes.every((route) => route.callee === routes[0].callee);
+    const hasCurrentNativeCalls =
+      managerCalls.filter((entry) => entry.method === "deleteAllArchivedConversations").length === 1 &&
+      managerCalls.filter((entry) => entry.method === "deleteArchivedConversation").length === 2;
+    if (!hasLegacyNativeCalls && !hasCurrentNativeCalls) return false;
     const errorEvidence = collectExecutableArchiveEvidence(errorFunction);
     const threadDeletes = errorEvidence.calls.map(nativeArchiveThreadDetail).filter(Boolean);
     return threadDeletes.length === 1;
@@ -1008,9 +1119,17 @@ function inspectArchiveDataControlsSource(source) {
     ["thread/delete", 0],
     ["delete-conversation", 0],
   ]);
+  const managerCallCounts = {
+    deleteArchivedConversation: 0,
+    deleteAllArchivedConversations: 0,
+  };
   walkArchive(ast, (node) => {
     const value = archiveLiteral(node);
     if (tokenCounts.has(value)) tokenCounts.set(value, tokenCounts.get(value) + 1);
+    if (node.type === "CallExpression" && node.callee?.type === "MemberExpression") {
+      const method = node.callee.property?.name ?? archiveLiteral(node.callee.property);
+      if (Object.hasOwn(managerCallCounts, method)) managerCallCounts[method] += 1;
+    }
   });
   const labelProperties = [];
   walkArchive(ast, (node) => {
@@ -1059,17 +1178,27 @@ function inspectArchiveDataControlsSource(source) {
     tokenCounts.get("delete-archived-conversation") === 2 &&
     tokenCounts.get("settings.dataControls.archivedChats.delete") === 1 &&
     tokenCounts.get("thread/delete") === 1;
+  const currentNativeEvidence =
+    labelProperties.length === 1 &&
+    nativeFunctions.length === 1 &&
+    tokenCounts.get("delete-archived-conversation") === 0 &&
+    tokenCounts.get("settings.dataControls.archivedChats.delete") === 1 &&
+    tokenCounts.get("thread/delete") === 1 &&
+    managerCallCounts.deleteArchivedConversation === 2 &&
+    managerCallCounts.deleteAllArchivedConversations === 1;
   const legacyEvidence =
     legacyFunctions.length === 1 && tokenCounts.get("delete-conversation") === 1;
   const anyNativeToken =
     tokenCounts.get("delete-archived-conversation") > 0 ||
     tokenCounts.get("settings.dataControls.archivedChats.delete") > 0 ||
-    tokenCounts.get("thread/delete") > 0;
+    tokenCounts.get("thread/delete") > 0 ||
+    managerCallCounts.deleteArchivedConversation > 0 ||
+    managerCallCounts.deleteAllArchivedConversations > 0;
   const anyLegacyToken = tokenCounts.get("delete-conversation") > 0;
-  if (nativeEvidence && legacyEvidence) {
+  if ((nativeEvidence || currentNativeEvidence) && legacyEvidence) {
     throw new Error("archive native and legacy UI modes are mutually exclusive");
   }
-  if (nativeEvidence) return { mode: "native", status: "native" };
+  if (nativeEvidence || currentNativeEvidence) return { mode: "native", status: "native" };
   if (legacyEvidence) return { mode: "legacy", status: "already" };
   if (anyNativeToken) throw new Error("native archive-delete UI evidence is detached or structurally malformed");
   if (anyLegacyToken) throw new Error("legacy archive-delete UI evidence is detached or structurally malformed");
@@ -1104,13 +1233,18 @@ function patchArchiveContracts({ appMainSource, dataControlsSource }) {
   const dataControls = patchDataControlsSource(dataControlsSource);
   const compatible =
     (appMain.mode === "combined" && dataControls.mode === "native") ||
+    (appMain.mode === "native-api" && dataControls.mode === "native") ||
     (appMain.mode === "legacy" && dataControls.mode === "legacy");
   if (!compatible) {
     throw new Error(
       `archive route/UI mode mismatch: app-main=${appMain.mode}, data-controls=${dataControls.mode}`,
     );
   }
-  const status = appMain.status === "already" ? "already" : "patched";
+  const status = appMain.status === "already"
+    ? "already"
+    : appMain.status === "native" && dataControls.status === "native"
+      ? "native"
+      : "patched";
   return {
     status,
     appMain,
@@ -1150,6 +1284,8 @@ function mayContainArchiveRouteContract(source) {
   return (
     source.includes("archive-conversation") ||
     source.includes("delete-archived-conversation") ||
+    source.includes("delete-archived-thread") ||
+    source.includes("delete-all-archived-threads") ||
     source.includes("delete-conversation")
   );
 }
@@ -1157,6 +1293,8 @@ function mayContainArchiveRouteContract(source) {
 function mayContainArchiveDataControlsContract(source) {
   return (
     source.includes("delete-archived-conversation") ||
+    (source.includes("deleteArchivedConversation") &&
+      source.includes("settings.dataControls.archivedChats.delete")) ||
     (source.includes("delete-conversation") && source.includes("codexConfirmDelete"))
   );
 }
@@ -1187,6 +1325,9 @@ function archiveRouteOwnershipEvidence(source) {
     }
   });
   const evidence = [];
+  if (nativeArchiveManagerEvidence(ast)) {
+    evidence.push("native archive manager API owns archived thread deletion");
+  }
   if (liveRouteNames.has("archive-conversation")) {
     evidence.push("archive-conversation property reaches live router consumer");
   }
@@ -1449,8 +1590,11 @@ function findWindowsArchiveTargets(directory) {
     const filePath = path.join(directory, fileName);
     const source = fs.readFileSync(filePath, "utf-8");
     const isAppMain =
-      source.includes("archive-conversation") &&
-      source.includes(".archiveConversation(");
+      (source.includes("archive-conversation") &&
+        source.includes(".archiveConversation(")) ||
+      (source.includes("delete-archived-thread") &&
+        source.includes("delete-all-archived-threads") &&
+        source.includes("deleteArchivedConversation("));
     const isDataControls =
       isDataControlsName && mayContainArchiveDataControlsContract(source);
     if (!isAppMain && !isDataControls) continue;

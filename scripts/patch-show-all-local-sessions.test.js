@@ -10,6 +10,9 @@ const {
 const SOURCE =
   "function group(e,u,c,l){let d=e.hostId==null||l(e.hostId)?c:e.hostId,p=u?.threadProjectAssignments?.[e.conversationId];return d+p}" +
   "function roots(n,t,a,l){let e=n.hostId==null||l(n.hostId)?t:n.hostId,r=n.cwd;if(!r||e!==t&&!a.has(e))continue;}";
+const CURRENT_SOURCE =
+  "function group(e,u,c,l){let d=e.hostId==null||l(e.hostId)?c:e.hostId,p=u?.threadProjectAssignments?.[e.conversationId];return d+p}" +
+  "function roots(n,t,a,l){let e=n.hostId==null||l(n.hostId)?t:n.hostId;if(n.summary!=null&&!ok(n.cwd))continue;let r=n.cwd;if(!r||e!==t&&!a.has(e))continue;}";
 
 test("patches structural local-session targets and remains idempotent", () => {
   const first = patchProjectGroupSource(SOURCE);
@@ -27,4 +30,13 @@ test("patches structural local-session targets and remains idempotent", () => {
 test("fails closed when either structural role is missing or duplicated", () => {
   assert.throws(() => patchProjectGroupSource(SOURCE.split("function roots")[0]), /workspace root.*found 0/i);
   assert.throws(() => patchProjectGroupSource(`${SOURCE}${SOURCE}`), /local session.*found 2/i);
+});
+
+test("patches the current workspace-root layout with an intervening eligibility check", () => {
+  const first = patchProjectGroupSource(CURRENT_SOURCE);
+  assert.equal(first.status, "patched");
+  assert.ok(first.code.includes(LOCAL_HOST_MARKER));
+  assert.ok(first.code.includes(ROOT_HOST_MARKER));
+  assert.match(first.code, /if\(n\.summary!=null&&!ok\(n\.cwd\)\)continue;/);
+  assert.equal(patchProjectGroupSource(first.code).status, "already");
 });
