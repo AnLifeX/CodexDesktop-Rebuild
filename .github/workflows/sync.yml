@@ -12,7 +12,7 @@ on:
       publish_release:
         description: "Publish a formal GitHub Release and Windows update feed instead of a test draft"
         type: boolean
-        default: false
+        default: true
 
 env:
   NODE_VERSION: "24"
