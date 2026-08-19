@@ -706,22 +706,34 @@ function inspectThreadActionsPostcondition(code) {
   walkOwnExecutableBody(declaration.init.body, (node) => {
     if (
       node.type === "CallExpression" &&
-      literalValue(node.arguments[0]) === "delete-conversation" &&
+      ((literalValue(node.arguments[0]) === "delete-conversation" &&
+        node.arguments[1]?.type === "ObjectExpression") ||
+        (node.callee?.type === "MemberExpression" &&
+          node.callee.property?.name === "sendRequest" &&
+          literalValue(node.arguments[0]) === "thread/delete" &&
+          node.arguments[1]?.type === "ObjectExpression")) &&
       node.arguments[1]?.type === "ObjectExpression"
     ) routeCalls.push(node);
   });
-  if (routeCalls.length !== 1 || !conversationId || !hostId) {
+  if (routeCalls.length !== 1 || !conversationId) {
     throw new Error("sidebar thread-actions delete route postcondition is incomplete");
   }
   const routeOptions = routeCalls[0].arguments[1];
   const conversationProperty = objectProperty(routeOptions, "conversationId");
   const hostProperty = objectProperty(routeOptions, "hostId");
-  if (
-    !conversationProperty ||
-    !hostProperty ||
-    sourceFor(code, conversationProperty.value) !== conversationId ||
-    sourceFor(code, hostProperty.value) !== hostId
-  ) throw new Error("sidebar thread-actions delete route bindings are mismatched");
+  const threadProperty = objectProperty(routeOptions, "threadId");
+  if (literalValue(routeCalls[0].arguments[0]) === "delete-conversation") {
+    if (
+      !conversationProperty ||
+      !hostProperty ||
+      !hostId ||
+      sourceFor(code, conversationProperty.value) !== conversationId ||
+      sourceFor(code, hostProperty.value) !== hostId
+    ) throw new Error("sidebar thread-actions delete route bindings are mismatched");
+  } else if (
+    !threadProperty ||
+    sourceFor(code, threadProperty.value) !== conversationId
+  ) throw new Error("sidebar thread-actions direct delete bindings are mismatched");
   const enclosing = functions.filter(
     (fn) => fn.start < statement.start && fn.end > statement.end && fn.start < deleteBindings[0].start && fn.end > deleteBindings[0].end,
   );
@@ -749,15 +761,18 @@ function inspectThreadActionsPostcondition(code) {
   walkOwnExecutableBody(archiveAction.body, (node) => {
     if (
       node.type === "CallExpression" &&
-      literalValue(node.arguments[0]) === "archive-conversation"
+      (literalValue(node.arguments[0]) === "archive-conversation" ||
+        node.callee?.type === "MemberExpression" &&
+          node.callee.property?.name === "archiveConversation")
     ) archiveCalls.push(node);
   });
-  if (
-    archiveCalls.length !== 1 ||
-    sourceFor(code, archiveCalls[0].callee) !== sourceFor(code, routeCalls[0].callee)
-  ) {
+  if (archiveCalls.length !== 1) {
     throw new Error("sidebar thread-actions delete route is not bound to the live bridge");
   }
+  if (
+    literalValue(routeCalls[0].arguments[0]) === "delete-conversation" &&
+    sourceFor(code, archiveCalls[0].callee) !== sourceFor(code, routeCalls[0].callee)
+  ) throw new Error("sidebar thread-actions delete route is not bound to the live bridge");
   return { status: "already" };
 }
 
@@ -786,6 +801,114 @@ function migrateArchivedSidebarDeleteRoute(code) {
   return applySourceReplacements(code, [
     { start: route.start, end: route.end, text: "`delete-conversation`" },
   ]);
+}
+
+function patchCurrentThreadActionsSource(code) {
+  const ast = parseRequired(code, "current sidebar thread-actions");
+  const actionFunctions = [];
+  let messageObject = null;
+  walk(ast, (node) => {
+    if (node.type === "FunctionDeclaration") {
+      const source = sourceFor(code, node);
+      if (source.includes("copyConversationMarkdown") && source.includes("archiveConversation(")) {
+        actionFunctions.push(node);
+      }
+    }
+    if (node.type !== "ObjectExpression") return;
+    const archive = objectProperty(node, "archiveThread");
+    const archiveId = objectProperty(archive?.value, "id");
+    if (literalValue(archiveId?.value) === "sidebarElectron.archiveThread") {
+      messageObject = messageObject == null ? node : null;
+    }
+  });
+  if (actionFunctions.length !== 1) {
+    throw new Error(`sidebar current action expected exactly 1 target, found ${actionFunctions.length}`);
+  }
+  if (messageObject == null) throw new Error("sidebar current message family is ambiguous");
+  const owner = actionFunctions[0];
+  const returnedObjects = [];
+  const archiveBindings = [];
+  const returns = [];
+  walk(owner, (node) => {
+    if (node.type === "ReturnStatement") {
+      returns.push(node);
+      const argument = node.argument;
+      walk(argument, (inner) => {
+        if (inner.type !== "ObjectExpression") return;
+        const archive = objectProperty(inner, "archiveThread");
+        const markdown = objectProperty(inner, "copyConversationMarkdown");
+        if (archive && markdown) {
+          returnedObjects.push(inner);
+          if (archive.value?.type === "Identifier") archiveBindings.push(archive.value.name);
+        }
+      });
+    }
+  });
+  if (returnedObjects.length !== 1 || returns.length !== 1) {
+    throw new Error("sidebar current action return structure is ambiguous");
+  }
+  const binding = archiveBindings[0];
+  const archiveAction = directFunctionBinding(owner, binding);
+  if (!archiveAction) throw new Error("sidebar current archive action binding is missing");
+  const actionSource = sourceFor(code, archiveAction);
+  if (!actionSource.includes("archiveConversation(")) {
+    throw new Error("sidebar current archive action is not live");
+  }
+  const returnObject = returnedObjects[0];
+  if (objectProperty(returnObject, "deleteThread")) {
+    inspectThreadActionsPostcondition(code);
+    return {
+      code,
+      status: "already",
+      counts: {
+        messages: sidebarCount(0, 1, "sidebar messages"),
+        action: sidebarCount(0, 1, "sidebar action"),
+      },
+    };
+  }
+  const archiveManagerCalls = [];
+  walkOwnExecutableBody(archiveAction.body, (node) => {
+    if (
+      node.type === "CallExpression" &&
+      node.callee?.type === "MemberExpression" &&
+      node.callee.property?.name === "archiveConversation" &&
+      node.callee.object?.type === "CallExpression" &&
+      node.callee.object.callee?.type === "Identifier" &&
+      node.callee.object.callee.name === "Ig"
+    ) archiveManagerCalls.push(node);
+  });
+  if (archiveManagerCalls.length !== 1) {
+    throw new Error("sidebar current app-server manager binding is missing");
+  }
+  const managerCall = archiveManagerCalls[0].callee.object;
+  const managerScope = sourceFor(code, managerCall.arguments[0]);
+  const managerHost = sourceFor(code, managerCall.arguments[1]);
+  const returnStart = returns[0].start;
+  const archiveProp = objectProperty(returnObject, "archiveThread");
+  const messageArchiveProp = objectProperty(messageObject, "archiveThread");
+  const actionPropertyText =
+    ",deleteThread:CodexSidebarDeleteAction";
+  const messageText =
+    ",deleteThread:{id:`sidebarElectron.deleteThread`,defaultMessage:`Delete chat`,description:`Menu item to permanently delete a local chat`}" +
+    ",deleteThreadConfirmAction:{id:`sidebarElectron.deleteThreadConfirmAction`,defaultMessage:`Confirm`,description:`Inline confirmation button label shown before permanently deleting a local chat`}" +
+    ",deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`Failed to delete chat`,description:`Error message when permanently deleting a local chat`}";
+  const actionText =
+    `/* CodexSidebarDeleteAction */let CodexSidebarDeleteAction=e=>{let{conversationId:r,hostId:i,onDeleteStart:a,onDeleteSuccess:o,onDeleteError:s}=e;` +
+    `a?.(),Ig(${managerScope},i??${managerHost}).sendRequest(\`thread/delete\`,{threadId:r}).then(()=>o?.()).catch(()=>{s?.(),${managerScope}.get(Cg).danger(n.formatMessage(_Y.deleteThreadError))})};`;
+  const next = applySourceReplacements(code, [
+    { start: archiveProp.end, end: archiveProp.end, text: actionPropertyText },
+    { start: messageArchiveProp.end, end: messageArchiveProp.end, text: messageText },
+    { start: returnStart, end: returnStart, text: actionText },
+  ]);
+  inspectThreadActionsPostcondition(next);
+  return {
+    code: next,
+    status: "patched",
+    counts: {
+      messages: sidebarCount(1, 0, "sidebar messages"),
+      action: sidebarCount(1, 0, "sidebar action"),
+    },
+  };
 }
 
 function patchThreadActionsSource(code) {
@@ -820,6 +943,12 @@ function patchThreadActionsSource(code) {
     };
   }
 
+  if (
+    code.includes("copyConversationMarkdown") &&
+    code.includes(".archiveConversation(") &&
+    !code.includes("archive-conversation")
+  ) return patchCurrentThreadActionsSource(code);
+
   const replacements = (() => {
   const ast = parseRequired(code, "sidebar thread-actions");
   const archiveMessages = [];
@@ -833,7 +962,10 @@ function patchThreadActionsSource(code) {
     }
     if (node.type === "FunctionDeclaration") {
       const source = sourceFor(code, node);
-      if (source.includes("archive-conversation") && source.includes("copyConversationMarkdown")) {
+      if (
+        (source.includes("archive-conversation") || source.includes("archiveConversation(")) &&
+        source.includes("copyConversationMarkdown")
+      ) {
         actionFunctions.push(node);
       }
     }
@@ -852,8 +984,10 @@ function patchThreadActionsSource(code) {
   walk(actionFunction, (node) => {
     if (
       node.type === "CallExpression" &&
-      node.callee.type === "Identifier" &&
-      literalValue(node.arguments[0]) === "archive-conversation"
+      ((node.callee.type === "Identifier" &&
+        literalValue(node.arguments[0]) === "archive-conversation") ||
+        (node.callee?.type === "MemberExpression" &&
+          node.callee.property?.name === "archiveConversation"))
     ) archiveCalls.push(node);
     if (node.type === "ObjectExpression") {
       const names = node.properties.map(propertyName);
@@ -918,7 +1052,11 @@ function analyzeHoverFunction(code, node) {
     if (jsxAlias && inner.arguments[1]?.type === "ObjectExpression") {
       const actions = inner.arguments[1].properties.find((property) => propertyName(property) === "actions");
       const className = inner.arguments[1].properties.find((property) => propertyName(property) === "className");
-      if (actions?.value.type === "ArrayExpression" && className && inner.arguments[0]?.type === "Identifier") {
+      if (
+        ["ArrayExpression", "Identifier"].includes(actions?.value.type) &&
+        className &&
+        inner.arguments[0]?.type === "Identifier"
+      ) {
         actionRenders.push({ call: inner, actions: actions.value, className: className.value, jsxAlias });
       }
     }
@@ -933,7 +1071,24 @@ function analyzeHoverFunction(code, node) {
   ) throw new Error("sidebar hover action structure is incomplete");
   const formatCall = formatCalls[0];
   const render = actionRenders[0];
-  const spreadNames = render.actions.elements
+  let actionList = render.actions;
+  if (actionList.type === "Identifier") {
+    const assignments = [];
+    walk(node, (inner) => {
+      if (
+        inner.type === "AssignmentExpression" &&
+        inner.operator === "=" &&
+        inner.left.type === "Identifier" &&
+        inner.left.name === actionList.name &&
+        inner.right.type === "ArrayExpression"
+      ) assignments.push(inner.right);
+    });
+    if (assignments.length !== 1) {
+      throw new Error("sidebar hover action list binding is ambiguous");
+    }
+    actionList = assignments[0];
+  }
+  const spreadNames = actionList.elements
     .filter((element) => element?.type === "SpreadElement" && element.argument.type === "Identifier")
     .map((element) => element.argument.name);
   if (spreadNames.length !== 2) throw new Error("sidebar hover action lists are ambiguous");
@@ -1087,15 +1242,28 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     return sourceFor(code, property.value);
   };
   const archiveMessage = archiveItems[0].properties.find((property) => propertyName(property) === "message");
-  if (archiveMessage?.value.type !== "MemberExpression") {
-    throw new Error("sidebar archive message binding is missing");
+  let messageObject = archiveMessage?.value.type === "MemberExpression"
+    ? sourceFor(code, archiveMessage.value.object)
+    : null;
+  if (messageObject == null) {
+    const messageObjects = new Set();
+    walk(node, (inner) => {
+      if (
+        inner.type === "MemberExpression" &&
+        ["markThreadRead", "markThreadUnread", "copyWorkingDirectory"].includes(inner.property?.name)
+      ) messageObjects.add(sourceFor(code, inner.object));
+    });
+    if (messageObjects.size === 1) messageObject = [...messageObjects][0];
+  }
+  if (messageObject == null) {
+    throw new Error("sidebar archive message family is missing");
   }
   return {
     hookPattern: hookPatterns[0],
     stateDeclaration: stateDeclarations[0],
     handler,
     archiveItem: archiveItems[0],
-    messageObject: sourceFor(code, archiveMessage.value.object),
+    messageObject,
     hoverRender: render,
     callbackDependencies,
     callbackCacheTest,
@@ -1637,7 +1805,10 @@ function patchSidebarSource(code) {
   walk(ast, (node) => {
     if (node.type !== "FunctionDeclaration") return;
     const source = sourceFor(code, node);
-    if (source.includes("thread-primary-action") && source.includes(".archiveThread")) {
+    if (
+      source.includes("thread-primary-action") &&
+      (source.includes(".archiveThread") || source.includes("archiveThread:"))
+    ) {
       hoverFunctions.push(node);
     }
     if (source.includes("archive-thread") && source.includes("additionalHoverActionCount")) {
@@ -1806,7 +1977,10 @@ function inspectThreadActionsLayer(code) {
     }
     if (node.type === "FunctionDeclaration") {
       const source = sourceFor(code, node);
-      if (source.includes("archive-conversation") && source.includes("copyConversationMarkdown")) {
+      if (
+        (source.includes("archive-conversation") || source.includes("archiveConversation(")) &&
+        source.includes("copyConversationMarkdown")
+      ) {
         actionFunctions.push(node);
       }
     }
@@ -1837,7 +2011,10 @@ function inspectSidebarLayer(code) {
     ) recognizedEvidence = true;
     if (node.type !== "FunctionDeclaration") return;
     const source = sourceFor(code, node);
-    if (source.includes("thread-primary-action") && source.includes(".archiveThread")) {
+    if (
+      source.includes("thread-primary-action") &&
+      (source.includes(".archiveThread") || source.includes("archiveThread:"))
+    ) {
       hoverFunctions.push(node);
     }
     if (source.includes("archive-thread") && source.includes("additionalHoverActionCount")) {
@@ -1921,7 +2098,9 @@ function threadActionsOwnershipEvidence(code) {
     walkOwnExecutableBody(archiveAction.body, (node) => {
       if (
         node.type === "CallExpression" &&
-        literalValue(node.arguments[0]) === "archive-conversation"
+        (literalValue(node.arguments[0]) === "archive-conversation" ||
+          node.callee?.type === "MemberExpression" &&
+            node.callee.property?.name === "archiveConversation")
       ) {
         archiveCalls += 1;
       }
@@ -1936,7 +2115,7 @@ function threadActionsOwnershipEvidence(code) {
 function probeSidebarThreadActions(candidate) {
   if (
     !candidate.source.includes("sidebarElectron.archiveThread") ||
-    !candidate.source.includes("archive-conversation")
+    !(candidate.source.includes("archive-conversation") || candidate.source.includes("archiveConversation("))
   ) {
     return { state: "irrelevant", evidence: [] };
   }
@@ -1968,7 +2147,10 @@ function sidebarUiOwnershipEvidence(code) {
       return false;
     }
     const source = sourceFor(code, fn);
-    return source.includes("thread-primary-action") && source.includes(".archiveThread");
+    return (
+      source.includes("thread-primary-action") &&
+      (source.includes(".archiveThread") || source.includes("archiveThread:"))
+    );
   });
   const associatedPairs = [];
   for (const hover of hoverFunctions) {
@@ -2219,7 +2401,7 @@ function findWindowsSidebarTargets(directory) {
     const isThreadActions =
       source.includes("sidebarElectron.archiveThread") &&
       source.includes("copyConversationMarkdown") &&
-      source.includes("archive-conversation");
+      (source.includes("archive-conversation") || source.includes("archiveConversation("));
     const isSidebar =
       source.includes("thread-primary-action") &&
       source.includes("archive-thread") &&

@@ -17,6 +17,8 @@ const LOCAL_HOST_PATTERN =
   /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\.threadProjectAssignments\?\.\[\2\.conversationId\]/g;
 const ROOT_HOST_PATTERN =
   /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\5\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
+const CURRENT_ROOT_HOST_PATTERN =
+  /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId;(if\([^;]+\)continue;)let ([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\6\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;
@@ -24,7 +26,9 @@ function countOccurrences(source, needle) {
 
 function patchProjectGroupSource(source) {
   const localMatches = [...source.matchAll(LOCAL_HOST_PATTERN)];
-  const rootMatches = [...source.matchAll(ROOT_HOST_PATTERN)];
+  const legacyRootMatches = [...source.matchAll(ROOT_HOST_PATTERN)];
+  const currentRootMatches = [...source.matchAll(CURRENT_ROOT_HOST_PATTERN)];
+  const rootMatches = [...legacyRootMatches, ...currentRootMatches];
   const localAlready = countOccurrences(source, LOCAL_HOST_MARKER);
   const rootAlready = countOccurrences(source, ROOT_HOST_MARKER);
   if (localMatches.length + localAlready !== 1) {
@@ -44,9 +48,16 @@ function patchProjectGroupSource(source) {
       `let ${host}=${thread}.hostId==null||${isLocal}(${thread}.hostId)||!(${options}?.enabledRemoteHostIds?.has(${thread}.hostId)||${options}?.remoteProjects?.some(t=>t.hostId===${thread}.hostId))${LOCAL_HOST_MARKER}?${primary}:${thread}.hostId,${assignment}=${options}?.threadProjectAssignments?.[${thread}.conversationId]`,
     );
   }
-  if (rootMatches.length === 1) {
+  if (legacyRootMatches.length === 1) {
     code = code.replace(ROOT_HOST_PATTERN, (_match, host, thread, isLocal, primary, cwd, remoteHosts) =>
       `let ${host}=${thread}.hostId==null||${isLocal}(${thread}.hostId)||!${remoteHosts}.has(${thread}.hostId)${ROOT_HOST_MARKER}?${primary}:${thread}.hostId,${cwd}=${thread}.cwd;if(!${cwd}||${host}!==${primary}&&!${remoteHosts}.has(${host}))continue;`,
+    );
+  }
+  if (currentRootMatches.length === 1) {
+    code = code.replace(
+      CURRENT_ROOT_HOST_PATTERN,
+      (_match, host, thread, isLocal, primary, intervening, cwd, remoteHosts) =>
+        `let ${host}=${thread}.hostId==null||${isLocal}(${thread}.hostId)||!${remoteHosts}.has(${thread}.hostId)${ROOT_HOST_MARKER}?${primary}:${thread}.hostId;${intervening}let ${cwd}=${thread}.cwd;if(!${cwd}||${host}!==${primary}&&!${remoteHosts}.has(${host}))continue;`,
     );
   }
   return {
@@ -70,12 +81,16 @@ function locatePlatformCandidates(platform) {
     if (
       source.includes("threadProjectAssignments") &&
       (source.includes("enabledRemoteHostIds") || source.includes(LOCAL_HOST_MARKER)) &&
-      (ROOT_HOST_PATTERN.test(source) || source.includes(ROOT_HOST_MARKER))
+      (ROOT_HOST_PATTERN.test(source) ||
+        CURRENT_ROOT_HOST_PATTERN.test(source) ||
+        source.includes(ROOT_HOST_MARKER))
     ) {
       ROOT_HOST_PATTERN.lastIndex = 0;
+      CURRENT_ROOT_HOST_PATTERN.lastIndex = 0;
       candidates.push({ platform, path: filePath, source });
     }
     ROOT_HOST_PATTERN.lastIndex = 0;
+    CURRENT_ROOT_HOST_PATTERN.lastIndex = 0;
   }
   return candidates;
 }

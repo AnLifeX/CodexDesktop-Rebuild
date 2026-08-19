@@ -32,8 +32,8 @@ const ZH_CN_TRANSLATION_SPECS = [
     "互联网和已连接的应用",
   ],
   [
-    "composer.mode.agentMode.fullAccessConfirm.riskDescription",
-    "这可能带来敏感数据丢失或泄露、提示词注入等风险。你可以随时关闭此功能。<link>了解更多</link>",
+    "composer.mode.agentMode.fullAccessConfirm.riskDescriptionByModel",
+    "这会带来敏感数据丢失或泄露、提示词注入等风险。{isCyberModel, select, true {我们强烈建议改选“替我批准”，并根据你的使用场景自定义审核者策略。} other {你可以随时关闭此功能。}} <link>了解更多</link>",
   ],
   [
     "composer.mode.agentMode.fullAccessConfirm.terminal.description",
@@ -160,6 +160,14 @@ const ZH_CN_TRANSLATION_SPECS = [
   ["settings.voice.general", "通用"],
   ["settings.general.microphoneInput.description", "用于语音聊天和听写"],
   ["settings.general.realtimeVoice", "语音聊天"],
+  [
+    "settings.general.realtimeVoice.accessError",
+    "无法验证语音聊天访问权限",
+  ],
+  [
+    "settings.general.realtimeVoice.accessLoading",
+    "正在检查语音聊天访问权限…",
+  ],
   ["settings.general.realtimeVoice.choose", "选择语音"],
   ["settings.general.realtimeVoice.dialog.cancel", "取消"],
   ["settings.general.realtimeVoice.dialog.close", "关闭"],
@@ -199,6 +207,14 @@ const ZH_CN_TRANSLATION_SPECS = [
   [
     "settings.general.realtimeVoice.selectedAnnouncement",
     "已选择语音：{name}。{description}",
+  ],
+  [
+    "settings.general.realtimeVoice.unavailable.label",
+    "语音聊天不可用",
+  ],
+  [
+    "settings.general.realtimeVoice.unavailable.description",
+    "你的账户或工作区无法使用语音聊天",
   ],
   [
     "settings.general.realtimeVoice.voice.arbor.description",
@@ -375,6 +391,10 @@ if (ZH_CN_TRANSLATIONS.size !== ZH_CN_TRANSLATION_SPECS.length) {
 // Keep this intentionally small. These are confirmed semantic mistakes in the
 // current upstream catalog, not merely different wording preferences.
 const ZH_CN_FORCED_OVERRIDES = new Map([
+  [
+    "composer.mode.agentMode.fullAccessConfirm.riskDescriptionByModel",
+    "这会带来敏感数据丢失或泄露、提示词注入等风险。{isCyberModel, select, true {我们强烈建议改选“替我批准”，并根据你的使用场景自定义审核者策略。} other {你可以随时关闭此功能。}} <link>了解更多</link>",
+  ],
   [
     "codex.commandDescription.composer.togglePlanMode",
     "在当前输入框中开启或关闭规划模式",

@@ -1733,8 +1733,10 @@ function analyzeModernWebviewMenuBarCode(
   walkAst(ast, (node) => {
     if (node.type !== "FunctionDeclaration" || node.id?.type !== "Identifier") return;
     const source = code.slice(node.start, node.end);
+    const hasLegacySelectionToken = source.includes("menubar-selection-background");
+    const hasCurrentSelectionToken = source.includes("color-codex-application-menu-selection");
     if (
-      source.includes("menubar-selection-background") &&
+      (hasLegacySelectionToken || hasCurrentSelectionToken) &&
       source.includes("application-menu-content") &&
       source.includes("no-drag")
     ) candidates.push(node);
@@ -2339,7 +2341,8 @@ function patchWebviewMenuBarCode(code) {
     return inspection.canonicalSource;
   }
   if (
-    code.includes("menubar-selection-background") &&
+    (code.includes("menubar-selection-background") ||
+      code.includes("color-codex-application-menu-selection")) &&
     code.includes("application-menu-content")
   ) {
     return patchModernWebviewMenuBarCode(code);
@@ -3099,7 +3102,8 @@ function selectTitlebarTarget(normalizedFiles) {
       source.includes("windowsMenuBar.help") &&
       source.includes("showApplicationMenu");
     const isModern =
-      source.includes("menubar-selection-background") &&
+      (source.includes("menubar-selection-background") ||
+        source.includes("color-codex-application-menu-selection")) &&
       source.includes("application-menu-content");
     if (!isLegacy && !isModern) continue;
     try {
