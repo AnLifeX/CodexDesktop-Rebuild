@@ -257,6 +257,9 @@ const ZH_CN_TRANSLATION_SPECS = [
     "settings.general.realtimeVoice.voice.vale.description",
     "明快好奇",
   ],
+  ["sidebarElectron.deleteThread", "删除聊天"],
+  ["sidebarElectron.deleteThreadConfirmAction", "确认"],
+  ["sidebarElectron.deleteThreadError", "删除聊天失败"],
   [
     "settings.general.realtimeVoiceHotkey.captureAriaLabel",
     "语音聊天快捷键录制",
@@ -391,6 +394,9 @@ if (ZH_CN_TRANSLATIONS.size !== ZH_CN_TRANSLATION_SPECS.length) {
 // Keep this intentionally small. These are confirmed semantic mistakes in the
 // current upstream catalog, not merely different wording preferences.
 const ZH_CN_FORCED_OVERRIDES = new Map([
+  ["sidebarElectron.deleteThread", "删除聊天"],
+  ["sidebarElectron.deleteThreadConfirmAction", "确认"],
+  ["sidebarElectron.deleteThreadError", "删除聊天失败"],
   [
     "composer.mode.agentMode.fullAccessConfirm.riskDescriptionByModel",
     "这会带来敏感数据丢失或泄露、提示词注入等风险。{isCyberModel, select, true {我们强烈建议改选“替我批准”，并根据你的使用场景自定义审核者策略。} other {你可以随时关闭此功能。}} <link>了解更多</link>",

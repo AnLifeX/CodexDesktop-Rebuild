@@ -221,6 +221,18 @@ test("translation specs cover the confirmed visible UI gaps", () => {
   }
 });
 
+test("translation specs cover the injected sidebar delete messages", () => {
+  assert.equal(ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThread"), "删除聊天");
+  assert.equal(
+    ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThreadConfirmAction"),
+    "确认",
+  );
+  assert.equal(
+    ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThreadError"),
+    "删除聊天失败",
+  );
+});
+
 test("translation specs cover the confirmed keyboard shortcut rows", () => {
   const expected = new Map([
     ["codex.command.git.createBranch", "创建分支"],
