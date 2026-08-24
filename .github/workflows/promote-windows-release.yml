@@ -196,7 +196,6 @@ jobs:
       - name: Publish Windows update feed
         env:
           GH_TOKEN: ${{ github.token }}
-          FEED_STAGING_TAG: windows-update-feed-staging-${{ inputs.release_version }}
         run: |
           set -euo pipefail
           tag="$WINDOWS_UPDATE_TAG"
@@ -215,7 +214,6 @@ jobs:
               gh release delete-asset "$tag" "$asset" -y
             fi
           done
-          gh release delete "$FEED_STAGING_TAG" --cleanup-tag --yes
 
       - name: Remove metadata asset before publication
         env:
@@ -264,3 +262,13 @@ jobs:
             diff -u "$desired_assets" "$actual_assets" >&2 || true
             exit 1
           fi
+
+      - name: Remove Windows update feed staging draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FEED_STAGING_TAG: windows-update-feed-staging-${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          staging_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$FEED_STAGING_TAG" --jq '.id')"
+          test -n "$staging_id"
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$staging_id"

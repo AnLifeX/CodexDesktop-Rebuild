@@ -121,13 +121,16 @@ test("promotion workflow publishes the validated Windows draft and feed staging 
   assert.match(workflow, /gh release edit "\$RELEASE_TAG" --draft=false --latest/);
   assert.match(workflow, /gh release upload "\$tag" artifacts\/update-feed\/\*\.nupkg --clobber/);
   assert.match(workflow, /gh release upload "\$tag" artifacts\/update-feed\/RELEASES --clobber/);
-  assert.match(workflow, /gh release delete "\$FEED_STAGING_TAG" --cleanup-tag --yes/);
+  assert.match(workflow, /name: Remove Windows update feed staging draft/);
+  assert.match(workflow, /releases\/tags\/\$FEED_STAGING_TAG" --jq '\.id'/);
+  assert.match(workflow, /gh api --method DELETE "repos\/\$GITHUB_REPOSITORY\/releases\/\$staging_id"/);
+  assert.doesNotMatch(workflow, /--cleanup-tag/);
 });
 
 test("promotion workflow reconciles exactly the portable and installer ZIP assets", () => {
   const workflow = readWorkflow();
   const step = workflow.match(
-    /      - name: Reconcile exact release assets\n(?<body>[\s\S]*?)$/,
+    /      - name: Reconcile exact release assets\n(?<body>[\s\S]*?)(?=\n      - name:|$)/,
   )?.groups.body;
   assert.ok(step, "release asset reconciliation step should exist after upload");
   assert.match(step, /GH_TOKEN: \$\{\{ github\.token \}\}/);
