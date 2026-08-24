@@ -874,15 +874,70 @@ function patchCurrentThreadActionsSource(code) {
       node.callee.property?.name === "archiveConversation" &&
       node.callee.object?.type === "CallExpression" &&
       node.callee.object.callee?.type === "Identifier" &&
-      node.callee.object.callee.name === "Ig"
+      node.callee.object.arguments.length === 2
     ) archiveManagerCalls.push(node);
   });
   if (archiveManagerCalls.length !== 1) {
     throw new Error("sidebar current app-server manager binding is missing");
   }
   const managerCall = archiveManagerCalls[0].callee.object;
+  const archiveParameter = archiveAction.params[0];
+  const archivePatterns = [];
+  walkOwnExecutableBody(archiveAction.body, (node) => {
+    if (
+      node.type === "VariableDeclarator" &&
+      node.id?.type === "ObjectPattern" &&
+      node.init?.type === "Identifier" &&
+      archiveParameter?.type === "Identifier" &&
+      node.init.name === archiveParameter.name &&
+      patternBinding(node.id, "conversationId") &&
+      patternBinding(node.id, "hostId")
+    ) archivePatterns.push(node.id);
+  });
+  if (archivePatterns.length !== 1) {
+    throw new Error("sidebar current archive parameter bindings are ambiguous");
+  }
+  const conversationId = patternBinding(archivePatterns[0], "conversationId");
+  const hostId = patternBinding(archivePatterns[0], "hostId");
+  const managerFactory = sourceFor(code, managerCall.callee);
   const managerScope = sourceFor(code, managerCall.arguments[0]);
-  const managerHost = sourceFor(code, managerCall.arguments[1]);
+  const managerHostNode = managerCall.arguments[1];
+  const managerHostBindings = new Set();
+  walk(managerHostNode, (node) => {
+    if (node.type === "Identifier") managerHostBindings.add(node.name);
+  });
+  if (!managerHostBindings.has(conversationId)) {
+    throw new Error("sidebar current manager host is detached from the conversation binding");
+  }
+  const managerHost = managerHostBindings.has(hostId)
+    ? sourceFor(code, managerHostNode)
+    : `${hostId}??${sourceFor(code, managerHostNode)}`;
+  const archiveErrorCalls = [];
+  walk(archiveAction.body, (node) => {
+    if (
+      node.type !== "CallExpression" ||
+      node.callee?.type !== "MemberExpression" ||
+      node.callee.property?.name !== "danger" ||
+      node.arguments.length !== 1
+    ) return;
+    const format = node.arguments[0];
+    const message = format?.arguments?.[0];
+    if (
+      format?.type === "CallExpression" &&
+      format.callee?.type === "MemberExpression" &&
+      format.callee.property?.name === "formatMessage" &&
+      message?.type === "MemberExpression" &&
+      message.property?.name === "archiveThreadError"
+    ) archiveErrorCalls.push({ danger: node, format, message });
+  });
+  if (archiveErrorCalls.length !== 1) {
+    throw new Error("sidebar current archive error binding is ambiguous");
+  }
+  const archiveError = archiveErrorCalls[0];
+  const deleteErrorToast =
+    `${sourceFor(code, archiveError.danger.callee)}(` +
+    `${sourceFor(code, archiveError.format.callee)}(` +
+    `${sourceFor(code, archiveError.message.object)}.deleteThreadError))`;
   const returnStart = returns[0].start;
   const archiveProp = objectProperty(returnObject, "archiveThread");
   const messageArchiveProp = objectProperty(messageObject, "archiveThread");
@@ -893,8 +948,9 @@ function patchCurrentThreadActionsSource(code) {
     ",deleteThreadConfirmAction:{id:`sidebarElectron.deleteThreadConfirmAction`,defaultMessage:`Confirm`,description:`Inline confirmation button label shown before permanently deleting a local chat`}" +
     ",deleteThreadError:{id:`sidebarElectron.deleteThreadError`,defaultMessage:`Failed to delete chat`,description:`Error message when permanently deleting a local chat`}";
   const actionText =
-    `/* CodexSidebarDeleteAction */let CodexSidebarDeleteAction=e=>{let{conversationId:r,hostId:i,onDeleteStart:a,onDeleteSuccess:o,onDeleteError:s}=e;` +
-    `a?.(),Ig(${managerScope},i??${managerHost}).sendRequest(\`thread/delete\`,{threadId:r}).then(()=>o?.()).catch(()=>{s?.(),${managerScope}.get(Cg).danger(n.formatMessage(_Y.deleteThreadError))})};`;
+    `/* CodexSidebarDeleteAction */let CodexSidebarDeleteAction=CodexDeleteInput=>{` +
+    `let{conversationId:${conversationId},hostId:${hostId},onDeleteStart:CodexOnDeleteStart,onDeleteSuccess:CodexOnDeleteSuccess,onDeleteError:CodexOnDeleteError}=CodexDeleteInput;` +
+    `CodexOnDeleteStart?.(),${managerFactory}(${managerScope},${managerHost}).sendRequest(\`thread/delete\`,{threadId:${conversationId}}).then(()=>CodexOnDeleteSuccess?.()).catch(()=>{CodexOnDeleteError?.(),${deleteErrorToast}})};`;
   const next = applySourceReplacements(code, [
     { start: archiveProp.end, end: archiveProp.end, text: actionPropertyText },
     { start: messageArchiveProp.end, end: messageArchiveProp.end, text: messageText },

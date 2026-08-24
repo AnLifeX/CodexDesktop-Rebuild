@@ -94,12 +94,12 @@ test("the manual workflow publishes Windows by default", () => {
   );
 });
 
-test("scheduled sync publishes validated drafts while manual sync can leave drafts", () => {
+test("scheduled and default manual sync publish validated drafts", () => {
   const workflow = workflows.find(({ name }) => name === "sync.yml").text;
 
   assert.match(
     workflow,
-    /publish_release:\s*\n(?:\s+.*\n)*?\s+default: false/,
+    /publish_release:\s*\n(?:\s+.*\n)*?\s+default: true/,
   );
   assert.match(workflow, /name: Upload Windows assets to draft release/);
   assert.match(workflow, /name: Upload Windows update feed to draft staging release/);
@@ -123,6 +123,25 @@ test("Windows builds hand off through draft releases instead of Actions artifact
     assert.match(text, /name: Upload Windows update feed to draft staging release/);
     assert.match(text, /tag_name: windows-update-feed-staging-/);
     assert.match(text, /draft: true/);
+  }
+});
+
+test("staging drafts are deleted by release id only after public release publication", () => {
+  for (const { name, text } of workflows) {
+    const publishIndex = text.indexOf("name: Publish Windows draft release");
+    const replacementIndex = text.indexOf("name: Retarget replacement release tag");
+    const cleanupIndex = text.indexOf("name: Remove Windows update feed staging draft");
+    assert.ok(publishIndex !== -1, `${name} must publish the validated draft`);
+    assert.ok(cleanupIndex > publishIndex, `${name} must clean staging after publication`);
+    if (replacementIndex !== -1) {
+      assert.ok(cleanupIndex > replacementIndex, `${name} must clean staging after retargeting`);
+    }
+    assert.match(text, /releases\/tags\/\$FEED_STAGING_TAG" --jq '\.id'/);
+    assert.match(
+      text,
+      /gh api --method DELETE "repos\/\$GITHUB_REPOSITORY\/releases\/\$staging_id"/,
+    );
+    assert.doesNotMatch(text, /--cleanup-tag/);
   }
 });
 

@@ -477,7 +477,6 @@ jobs:
         if: inputs.publish_update_feed == true
         env:
           GH_TOKEN: ${{ github.token }}
-          FEED_STAGING_TAG: ${{ needs.build-windows.outputs.windows_feed_staging_tag }}
         run: |
           set -euo pipefail
           tag="${{ env.WINDOWS_UPDATE_TAG }}"
@@ -497,14 +496,6 @@ jobs:
               gh release delete-asset "$tag" "$asset" -y
             fi
           done
-          gh release delete "$FEED_STAGING_TAG" --cleanup-tag --yes
-
-      - name: Remove feed staging release when feed publication is disabled
-        if: inputs.publish_update_feed != true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FEED_STAGING_TAG: ${{ needs.build-windows.outputs.windows_feed_staging_tag }}
-        run: gh release delete "$FEED_STAGING_TAG" --cleanup-tag --yes
 
       - name: Remove metadata asset before publication
         if: inputs.replace_existing_release != true
@@ -533,3 +524,13 @@ jobs:
           tag="codex-win-${RELEASE_VERSION}"
           git tag --force "$tag" HEAD
           git push origin "refs/tags/$tag" --force
+
+      - name: Remove Windows update feed staging draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FEED_STAGING_TAG: ${{ needs.build-windows.outputs.windows_feed_staging_tag }}
+        run: |
+          set -euo pipefail
+          staging_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$FEED_STAGING_TAG" --jq '.id')"
+          test -n "$staging_id"
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$staging_id"

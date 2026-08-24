@@ -62,6 +62,15 @@ const LATEST_DOLLAR_WRAPPER_APP_MAIN = withLiveRouter(
   '"archive-conversation":$7(async($e,{conversationId:$t,cleanupWorktree:$n,source:$r})=>{await $e.archiveConversation($t,{cleanupWorktree:$n,source:$r})}),' +
     '"delete-archived-conversation":e9((e,{conversationId:t})=>e.deleteArchivedConversation(t))',
 );
+const LATEST_DELEGATED_NATIVE_APP_MAIN = [
+  "async function sharedDelete(context,threadId){",
+  "let result=threadId==null?await context.fetchFromHost(`delete-all-archived-threads`,{params:{hostId:context.hostId}}):await context.fetchFromHost(`delete-archived-thread`,{params:{hostId:context.hostId,threadId}});",
+  "return context.handleThreadDeletion(result.deletedThreadIds),result.deletedThreadIds}",
+  "class Manager{",
+  "async deleteArchivedConversation(threadId){return sharedDelete({hostId:this.hostId,fetchFromHost:this.fetchFromHost,handleThreadDeletion:this.handleThreadDeletion.bind(this)},threadId)}",
+  "async deleteAllArchivedConversations(){return sharedDelete({hostId:this.hostId,fetchFromHost:this.fetchFromHost,handleThreadDeletion:this.handleThreadDeletion.bind(this)})}",
+  "}",
+].join("");
 
 test("keeps native archive deletion and injects an independent active delete route", () => {
   assert.equal(
@@ -132,6 +141,26 @@ test("patches a live archive route whose compressed identifiers start with dolla
   });
   assert.equal(second.status, "already");
   assert.equal(second.appMain.code, first.appMain.code);
+});
+
+test("accepts the latest native manager methods delegated through a shared helper", () => {
+  const result = patchArchiveContracts({
+    appMainSource: LATEST_DELEGATED_NATIVE_APP_MAIN,
+    dataControlsSource: LATEST_NATIVE_DATA_CONTROLS,
+  });
+  assert.equal(result.status, "native");
+  assert.equal(result.appMain.status, "native");
+  assert.equal(result.appMain.mode, "native-api");
+  assert.equal(result.appMain.code, LATEST_DELEGATED_NATIVE_APP_MAIN);
+
+  const detached = LATEST_DELEGATED_NATIVE_APP_MAIN.replace(
+    "`delete-archived-thread`",
+    "`thread/read`",
+  );
+  assert.throws(
+    () => patchAppMainSource(detached),
+    /native archive manager API evidence is detached or structurally malformed/i,
+  );
 });
 
 test("patches a missing legacy route when the matching legacy UI is already present", () => {

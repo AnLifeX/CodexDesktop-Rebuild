@@ -16,6 +16,11 @@ const LATEST_THREAD_ACTIONS = [
   "function ne(){let e=(0,Q.c)(17),t=n(o),r=h(),i;i=e=>{let{conversationId:n,hostId:a,source:o,onArchiveStart:s,onArchiveSuccess:c,onArchiveError:l}=e;s?.(),v(`archive-conversation`,{conversationId:n,hostId:a,source:o}).then(()=>c?.()).catch(()=>{l?.(),t.get(y).danger(r.formatMessage($.archiveThreadError))})};let a=e=>{};let s=e=>{},c=e=>{},l=e=>{};let u;return u={archiveThread:i,interruptThread:a,renameThread:s,copyWorkingDirectory:c,copyConversationMarkdown:l},u}",
 ].join(";");
 
+const CURRENT_NATIVE_THREAD_ACTIONS = [
+  "let CurrentMessages=g({archiveThread:{id:`sidebarElectron.archiveThread`,defaultMessage:`Archive chat`,description:`Menu item to archive a local chat`}})",
+  "function CurrentActions(){let scope=getScope(),intl=getIntl(),archiveAction,copyAction,result;archiveAction=input=>{let{conversationId:threadId,hostId:hostId,source,onArchiveStart,onArchiveSuccess,onArchiveError}=input;onArchiveStart?.(),ManagerFactory(scope,hostId??scope.get(DefaultHost,threadId)).archiveConversation(threadId,{source}).then(()=>onArchiveSuccess?.()).catch(()=>{onArchiveError?.(),scope.get(Toast).danger(intl.formatMessage(CurrentMessages.archiveThreadError))})};copyAction=input=>{};return result={archiveThread:archiveAction,copyConversationMarkdown:copyAction},result}",
+].join(";");
+
 const LATEST_SIDEBAR = [
   "function Ac(e){let t=(0,Nc.c)(8),{archive:n,pinAction:r}=e,i=L();if(n==null&&r==null)return null;let a;t[0]===r?a=t[1]:(a=r==null?[]:[{id:`thread-pin-action`,ariaLabel:r.ariaLabel,onClick:r.onClick}],t[0]=r,t[1]=a);let o;t[2]!==n||t[3]!==i?(o=n==null?[]:[{id:`thread-primary-action`,ariaLabel:i.formatMessage(Sr.archiveThread),icon:(0,Fc.jsx)(Aa,{}),onClick:n}],t[2]=n,t[3]=i,t[4]=o):o=t[4];let s;return t[5]!==a||t[6]!==o?(s=(0,Fc.jsx)(oc,{actions:[...a,...o],className:Pa}),t[5]=a,t[6]=o,t[7]=s):s=t[7],s}",
   "function jc({conversationId:e,showPinActionOnHover:a=!1,canPin:i=!0,threadSummary:_=null}){let b=o(m),[S,C]=(0,Pc.useState)(!1),w=L(),{archiveThread:F,markThreadAsRead:R}=wr(),{beginArchive:ne,handleArchiveSuccess:re,handleArchiveError:ie}=Na({}),we=()=>{ne(),F({conversationId:e,hostId:_?.hostId,source:`sidebar_context_menu`,onArchiveSuccess:re,onArchiveError:ie})},Te=le(()=>{we()}),je=le(()=>[{id:`archive-thread`,message:Sr.archiveThread,onSelect:Te}]),Me=a&&i,Ne=(0,Pc.useCallback)(({archive:t})=>(0,Fc.jsx)(Ac,{archive:t,pinAction:Me?{ariaLabel:w.formatMessage(Eo),isPinned:!1,onClick:()=>{}}:void 0}),[Te,w,e,b,Me]);let Pe=(0,Fc.jsx)(Ma,{additionalHoverActionCount:Me?1:0,renderActions:Ne});return(0,Fc.jsx)(me,{getItems:je,children:Pe})}",
@@ -158,6 +163,32 @@ test("adds delete and inline-confirmation actions to the latest sidebar aliases 
         `${first.code};/* CodexSidebarDeleteHover */`,
       ),
     /sidebar hover\/row marker postcondition is malformed|sidebar hover.*expected exactly 1.*found 2/i,
+  );
+});
+
+test("patches current native thread actions without depending on a compressed manager name", () => {
+  const first = patchThreadActionsSource(CURRENT_NATIVE_THREAD_ACTIONS);
+  assert.equal(first.status, "patched");
+  assert.match(
+    first.code,
+    /ManagerFactory\(scope,hostId\?\?scope\.get\(DefaultHost,threadId\)\)\.sendRequest\(`thread\/delete`,\{threadId:threadId\}\)/,
+  );
+  assert.match(first.code, /intl\.formatMessage\(CurrentMessages\.deleteThreadError\)/);
+  assert.doesNotMatch(first.code, /\bIg\(/);
+  const second = patchThreadActionsSource(first.code);
+  assert.equal(second.status, "already");
+  assert.equal(second.code, first.code);
+});
+
+test("adds the caller host fallback when the native archive manager uses only a default host", () => {
+  const withoutCallerHost = CURRENT_NATIVE_THREAD_ACTIONS.replace(
+    "hostId??scope.get(DefaultHost,threadId)",
+    "scope.get(DefaultHost,threadId)",
+  );
+  const result = patchThreadActionsSource(withoutCallerHost);
+  assert.match(
+    result.code,
+    /ManagerFactory\(scope,hostId\?\?scope\.get\(DefaultHost,threadId\)\)\.sendRequest/,
   );
 });
 
