@@ -71,6 +71,16 @@ const LATEST_DELEGATED_NATIVE_APP_MAIN = [
   "async deleteAllArchivedConversations(){return sharedDelete({hostId:this.hostId,fetchFromHost:this.fetchFromHost,handleThreadDeletion:this.handleThreadDeletion.bind(this)})}",
   "}",
 ].join("");
+const LATEST_SHARED_NATIVE_DATA_CONTROLS = [
+  'import{messages as X}from"./app-initial-latest.js";',
+  "function Settings(){",
+  "let mutation=async e=>e.kind===`all`?manager(e).deleteAllArchivedConversations():e.kind===`project`?(await Promise.all(e.threadIds.map(t=>manager(e).deleteArchivedConversation(t)))).flat():manager(e).deleteArchivedConversation(e.thread.id);",
+  "let onError=e=>classify(e,`thread/delete`);",
+  "let options={mutationFn:mutation,onError};",
+  "useMutation(options);",
+  "return jsx(Button,{children:X.delete})}",
+  "export{Settings as DataControlsSettings}",
+].join("");
 
 test("keeps native archive deletion and injects an independent active delete route", () => {
   assert.equal(
@@ -160,6 +170,28 @@ test("accepts the latest native manager methods delegated through a shared helpe
   assert.throws(
     () => patchAppMainSource(detached),
     /native archive manager API evidence is detached or structurally malformed/i,
+  );
+});
+
+test("accepts a native archive UI whose delete message comes from a shared catalog", () => {
+  const result = patchArchiveContracts({
+    appMainSource: LATEST_DELEGATED_NATIVE_APP_MAIN,
+    dataControlsSource: LATEST_SHARED_NATIVE_DATA_CONTROLS,
+  });
+  assert.equal(result.status, "native");
+  assert.equal(result.dataControls.status, "native");
+
+  assert.throws(
+    () => patchDataControlsSource(
+      LATEST_SHARED_NATIVE_DATA_CONTROLS.replace("X.delete", "X.remove"),
+    ),
+    /native archive-delete UI evidence is detached or structurally malformed/i,
+  );
+  assert.throws(
+    () => patchDataControlsSource(
+      LATEST_SHARED_NATIVE_DATA_CONTROLS.replace("X.delete", "[X.delete,X.delete]"),
+    ),
+    /native archive-delete UI evidence is detached or structurally malformed/i,
   );
 });
 

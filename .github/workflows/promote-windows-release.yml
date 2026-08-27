@@ -221,7 +221,7 @@ jobs:
           RELEASE_TAG: codex-win-${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
+          release_id="$(gh release view "$RELEASE_TAG" --json databaseId --jq '.databaseId')"
           asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate --jq '.[] | select(.name == "windows-release-metadata.json") | .id' | head -n 1)"
           test -n "$asset_id"
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
@@ -269,6 +269,6 @@ jobs:
           FEED_STAGING_TAG: windows-update-feed-staging-${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          staging_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$FEED_STAGING_TAG" --jq '.id')"
+          staging_id="$(gh release view "$FEED_STAGING_TAG" --json databaseId --jq '.databaseId')"
           test -n "$staging_id"
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$staging_id"

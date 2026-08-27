@@ -19,6 +19,7 @@ const { SRC_DIR, relPath } = require("./patch-util");
 
 const E_NOINTERFACE = 0x80004002;
 const ERROR_MARKER = Buffer.from("SetIsBorderRequired failed", "ascii");
+const BORDER_SESSION_IID = Buffer.from("66d9cdf2ae22a15e95963a289344c3be", "hex");
 const DEFAULT_TARGET = path.join(
   SRC_DIR,
   "win",
@@ -91,6 +92,17 @@ function fileOffsetToRva(sections, fileOffset) {
   return section.virtualAddress + fileOffset - section.rawOffset;
 }
 
+function rvaToFileOffset(sections, rva) {
+  const section = sections.find(
+    (candidate) =>
+      rva >= candidate.virtualAddress &&
+      rva < candidate.virtualAddress + Math.max(candidate.virtualSize, candidate.rawSize),
+  );
+  if (!section) return null;
+  const fileOffset = section.rawOffset + rva - section.virtualAddress;
+  return fileOffset < section.rawOffset + section.rawSize ? fileOffset : null;
+}
+
 function findAll(buffer, needle, start = 0, end = buffer.length) {
   const offsets = [];
   let offset = start;
@@ -132,7 +144,7 @@ function locateBorderErrorXref(buffer, sections, text, markerRva) {
 }
 
 function validateErrorContextTrailer(buffer, xrefOffset) {
-  const fixed = [
+  const legacy = [
     [7, 0x6a],
     [8, ERROR_MARKER.length],
     [9, 0x41],
@@ -146,20 +158,42 @@ function validateErrorContextTrailer(buffer, xrefOffset) {
     [22, 0xc0],
     [23, 0x75],
   ];
-  if (fixed.some(([relative, byte]) => buffer[xrefOffset + relative] !== byte)) {
-    throw new Error("SetIsBorderRequired error context instructions changed");
+  if (
+    legacy.every(([relative, byte]) => buffer[xrefOffset + relative] === byte) &&
+    [0xc3, 0xc6].includes(buffer[xrefOffset + 19])
+  ) {
+    return xrefOffset + 25;
   }
-  // Rust's register allocation changed between the previous and current
-  // Computer Use runtimes (`mov rsi, rax` -> `mov rbx, rax`).  The register
-  // itself is not part of the compatibility patch; keep validating the
-  // instruction shape while accepting both known encodings.
-  if (![0xc3, 0xc6].includes(buffer[xrefOffset + 19])) {
-    throw new Error("SetIsBorderRequired error context instructions changed");
-  }
-  return xrefOffset + 25;
+
+  // Newer Rust builds load the marker length before its LEA instead of using
+  // push/pop after it. Registers can vary, so validate the complete instruction
+  // family and the exact marker length while leaving allocation unconstrained.
+  const directLengthSetup =
+    matchesBytes(buffer, xrefOffset - 12, [0x41, 0xb9]) &&
+    buffer.readUInt32LE(xrefOffset - 10) === ERROR_MARKER.length &&
+    matchesBytes(buffer, xrefOffset - 6, [0x48, 0x89]) &&
+    matchesBytes(buffer, xrefOffset - 3, [0x44, 0x89]);
+  const directTrailer =
+    buffer[xrefOffset + 7] === 0xe8 &&
+    [0x48, 0x49].includes(buffer[xrefOffset + 12]) &&
+    buffer[xrefOffset + 13] === 0x89 &&
+    (buffer[xrefOffset + 14] & 0xf8) === 0xc0 &&
+    matchesBytes(buffer, xrefOffset + 15, [0x48, 0x85, 0xc0, 0x75]);
+  if (directLengthSetup && directTrailer) return xrefOffset + 20;
+
+  throw new Error("SetIsBorderRequired error context instructions changed");
 }
 
-function locateQueryResultPatch(buffer, xrefOffset) {
+function queryInterfaceIid(buffer, sections, queryCallOffset) {
+  const leaOffset = queryCallOffset - 12;
+  if (!matchesBytes(buffer, leaOffset, [0x48, 0x8d, 0x15])) return null;
+  const leaRva = fileOffsetToRva(sections, leaOffset);
+  const iidRva = leaRva + 7 + buffer.readInt32LE(leaOffset + 3);
+  const iidOffset = rvaToFileOffset(sections, iidRva);
+  return iidOffset == null ? null : buffer.subarray(iidOffset, iidOffset + 16);
+}
+
+function locateQueryResultPatch(buffer, sections, xrefOffset) {
   const start = Math.max(0, xrefOffset - 320);
   const candidates = [];
   for (let offset = start; offset + 13 < xrefOffset; offset++) {
@@ -170,10 +204,19 @@ function locateQueryResultPatch(buffer, xrefOffset) {
       candidates.push(offset);
     }
   }
-  if (candidates.length !== 1) {
+  const borderCandidates = candidates.filter((offset) => {
+    const iid = queryInterfaceIid(buffer, sections, offset);
+    return iid?.length === BORDER_SESSION_IID.length && iid.equals(BORDER_SESSION_IID);
+  });
+  const selected = borderCandidates.length === 1
+    ? borderCandidates[0]
+    : candidates.length === 1 && borderCandidates.length === 0
+      ? candidates[0]
+      : null;
+  if (selected == null) {
     throw new Error(`Expected one optional border QI result sequence, found ${candidates.length}`);
   }
-  const queryCallOffset = candidates[0];
+  const queryCallOffset = selected;
   const patchOffset = queryCallOffset + 2;
   const continuationOffset = queryCallOffset + 9;
   return { continuationOffset, patchOffset };
@@ -265,7 +308,11 @@ function patchComputerUseBuffer(input) {
     return { buffer, caveOffset: existing.caveOffset, patchOffset: existing.offset, status: "already-patched" };
   }
 
-  const { continuationOffset, patchOffset } = locateQueryResultPatch(buffer, xrefOffset);
+  const { continuationOffset, patchOffset } = locateQueryResultPatch(
+    buffer,
+    sections,
+    xrefOffset,
+  );
   const original = buffer.subarray(patchOffset, patchOffset + 7);
   if (original[0] !== 0x89 || original[1] !== 0xc1 || original[2] !== 0xe8) {
     throw new Error("Optional border QI conversion instructions changed");
