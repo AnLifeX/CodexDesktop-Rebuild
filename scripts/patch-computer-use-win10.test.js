@@ -27,6 +27,8 @@ function createFixture({
   duplicateMarker = false,
   corruptQuery = false,
   contextRegister = 0xc6,
+  directContext = false,
+  adjacentQuery = false,
 } = {}) {
   const buffer = Buffer.alloc(0xc00);
   buffer.write("MZ", 0, "ascii");
@@ -60,6 +62,16 @@ function createFixture({
   const markerRva = 0x2050;
 
   const queryOffset = 0x480;
+  const borderIidOffset = 0x8c0;
+  Buffer.from("66d9cdf2ae22a15e95963a289344c3be", "hex").copy(
+    buffer,
+    borderIidOffset,
+  );
+  Buffer.from([0x48, 0x8d, 0x15, 0, 0, 0, 0, 0x4c, 0x8d, 0x44, 0x24, 0x60]).copy(
+    buffer,
+    queryOffset - 12,
+  );
+  buffer.writeInt32LE(0x20c0 - (0x1074 + 7), queryOffset - 9);
   Buffer.from([
     0xff,
     0x10,
@@ -85,30 +97,88 @@ function createFixture({
   if (corruptQuery) buffer[queryOffset + 9] = 0x84;
   const queryCallOffset = queryOffset + 4;
   writeRel32(buffer, queryCallOffset, 0x1084, 0x1180);
+  if (adjacentQuery) {
+    const adjacentOffset = 0x4c0;
+    Buffer.from("40ae392c2e7d4450804e8b6799d4cf9e", "hex").copy(buffer, 0x8d0);
+    Buffer.from([0x48, 0x8d, 0x15, 0, 0, 0, 0, 0x4c, 0x8d, 0x44, 0x24, 0x60]).copy(
+      buffer,
+      adjacentOffset - 12,
+    );
+    buffer.writeInt32LE(0x20d0 - (0x10b4 + 7), adjacentOffset - 9);
+    Buffer.from([
+      0xff,
+      0x10,
+      0x89,
+      0xc1,
+      0xe8,
+      0,
+      0,
+      0,
+      0,
+      0x85,
+      0xd2,
+      0x74,
+      0x24,
+    ]).copy(buffer, adjacentOffset);
+    writeRel32(buffer, adjacentOffset + 4, 0x10c4, 0x1180);
+  }
 
   const xrefOffset = 0x520;
+  if (directContext) {
+    Buffer.from([
+      0x41,
+      0xb9,
+      ERROR_MARKER.length,
+      0,
+      0,
+      0,
+      0x48,
+      0x89,
+      0xf1,
+      0x44,
+      0x89,
+      0xf2,
+    ]).copy(buffer, xrefOffset - 12);
+  }
   Buffer.from([0x4c, 0x8d, 0x05, 0, 0, 0, 0]).copy(buffer, xrefOffset);
   buffer.writeInt32LE(markerRva - (0x1120 + 7), xrefOffset + 3);
-  Buffer.from([
-    0x6a,
-    ERROR_MARKER.length,
-    0x41,
-    0x59,
-    0xe8,
-    0,
-    0,
-    0,
-    0,
-    0x90,
-    0x48,
-    0x89,
-    contextRegister,
-    0x48,
-    0x85,
-    0xc0,
-    0x75,
-    0x3e,
-  ]).copy(buffer, xrefOffset + 7);
+  const trailer = directContext
+    ? [
+        0xe8,
+        0,
+        0,
+        0,
+        0,
+        0x49,
+        0x89,
+        0xc6,
+        0x48,
+        0x85,
+        0xc0,
+        0x75,
+        0x2e,
+      ]
+    : [
+        0x6a,
+        ERROR_MARKER.length,
+        0x41,
+        0x59,
+        0xe8,
+        0,
+        0,
+        0,
+        0,
+        0x90,
+        0x48,
+        0x89,
+        contextRegister,
+        0x48,
+        0x85,
+        0xc0,
+        0x75,
+        0x3e,
+      ];
+  Buffer.from(trailer).copy(buffer, xrefOffset + 7);
   return buffer;
 }
 
@@ -145,6 +215,18 @@ test("patches only the optional border-interface E_NOINTERFACE path", () => {
 test("accepts the current runtime's alternate error-context register allocation", () => {
   const result = patchComputerUseBuffer(createFixture({ contextRegister: 0xc3 }));
   assert.equal(result.status, "patched");
+});
+
+test("accepts the latest runtime's preloaded marker-length context", () => {
+  const result = patchComputerUseBuffer(createFixture({
+    directContext: true,
+    adjacentQuery: true,
+  }));
+  assert.equal(result.status, "patched");
+  assert.equal(result.patchOffset, 0x482);
+
+  const second = patchComputerUseBuffer(result.buffer);
+  assert.equal(second.status, "already-patched");
 });
 
 test("fails closed when the helper markers or QI instructions change", () => {

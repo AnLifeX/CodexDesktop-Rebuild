@@ -1266,6 +1266,13 @@ function isLiveNativeArchiveMutation(fn) {
 function inspectArchiveDataControlsSource(source) {
   const ast = parseArchiveSource(source, "archive data-controls");
   const reachability = createArchiveReachability(ast);
+  const importedBindings = new Set();
+  for (const statement of ast.body) {
+    if (statement.type !== "ImportDeclaration") continue;
+    for (const specifier of statement.specifiers) {
+      if (specifier.local?.type === "Identifier") importedBindings.add(specifier.local.name);
+    }
+  }
   const tokenCounts = new Map([
     ["delete-archived-conversation", 0],
     ["settings.dataControls.archivedChats.delete", 0],
@@ -1285,13 +1292,23 @@ function inspectArchiveDataControlsSource(source) {
     }
   });
   const labelProperties = [];
+  const importedLabelMembers = [];
   walkArchive(ast, (node) => {
-    if (node.type !== "Property" || archivePropertyName(node) !== "delete") return;
-    const id = node.value?.type === "ObjectExpression"
-      ? node.value.properties.find((item) => archivePropertyName(item) === "id")
-      : null;
-    if (archiveLiteral(id?.value) === "settings.dataControls.archivedChats.delete") {
-      labelProperties.push(node);
+    if (node.type === "Property" && archivePropertyName(node) === "delete") {
+      const id = node.value?.type === "ObjectExpression"
+        ? node.value.properties.find((item) => archivePropertyName(item) === "id")
+        : null;
+      if (archiveLiteral(id?.value) === "settings.dataControls.archivedChats.delete") {
+        labelProperties.push(node);
+      }
+    }
+    if (
+      node.type === "MemberExpression" &&
+      node.object?.type === "Identifier" &&
+      importedBindings.has(node.object.name) &&
+      (node.computed ? archiveLiteral(node.property) : node.property?.name) === "delete"
+    ) {
+      importedLabelMembers.push(node);
     }
   });
   const nativeFunctions = [];
@@ -1325,17 +1342,23 @@ function inspectArchiveDataControlsSource(source) {
       legacyFunctions.push(node);
     }
   });
-  const nativeEvidence =
+  const localLabelEvidence =
     labelProperties.length === 1 &&
+    tokenCounts.get("settings.dataControls.archivedChats.delete") === 1;
+  const importedLabelEvidence =
+    labelProperties.length === 0 &&
+    tokenCounts.get("settings.dataControls.archivedChats.delete") === 0 &&
+    importedLabelMembers.length === 1;
+  const deleteLabelEvidence = localLabelEvidence || importedLabelEvidence;
+  const nativeEvidence =
+    deleteLabelEvidence &&
     nativeFunctions.length === 1 &&
     tokenCounts.get("delete-archived-conversation") === 2 &&
-    tokenCounts.get("settings.dataControls.archivedChats.delete") === 1 &&
     tokenCounts.get("thread/delete") === 1;
   const currentNativeEvidence =
-    labelProperties.length === 1 &&
+    deleteLabelEvidence &&
     nativeFunctions.length === 1 &&
     tokenCounts.get("delete-archived-conversation") === 0 &&
-    tokenCounts.get("settings.dataControls.archivedChats.delete") === 1 &&
     tokenCounts.get("thread/delete") === 1 &&
     managerCallCounts.deleteArchivedConversation === 2 &&
     managerCallCounts.deleteAllArchivedConversations === 1;
@@ -1344,6 +1367,7 @@ function inspectArchiveDataControlsSource(source) {
   const anyNativeToken =
     tokenCounts.get("delete-archived-conversation") > 0 ||
     tokenCounts.get("settings.dataControls.archivedChats.delete") > 0 ||
+    importedLabelMembers.length > 0 ||
     tokenCounts.get("thread/delete") > 0 ||
     managerCallCounts.deleteArchivedConversation > 0 ||
     managerCallCounts.deleteAllArchivedConversations > 0;

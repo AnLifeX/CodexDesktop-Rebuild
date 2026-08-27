@@ -122,7 +122,10 @@ test("promotion workflow publishes the validated Windows draft and feed staging 
   assert.match(workflow, /gh release upload "\$tag" artifacts\/update-feed\/\*\.nupkg --clobber/);
   assert.match(workflow, /gh release upload "\$tag" artifacts\/update-feed\/RELEASES --clobber/);
   assert.match(workflow, /name: Remove Windows update feed staging draft/);
-  assert.match(workflow, /releases\/tags\/\$FEED_STAGING_TAG" --jq '\.id'/);
+  assert.match(
+    workflow,
+    /gh release view "\$FEED_STAGING_TAG" --json databaseId --jq '\.databaseId'/,
+  );
   assert.match(workflow, /gh api --method DELETE "repos\/\$GITHUB_REPOSITORY\/releases\/\$staging_id"/);
   assert.doesNotMatch(workflow, /--cleanup-tag/);
 });

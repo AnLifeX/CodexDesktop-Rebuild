@@ -136,12 +136,30 @@ test("staging drafts are deleted by release id only after public release publica
     if (replacementIndex !== -1) {
       assert.ok(cleanupIndex > replacementIndex, `${name} must clean staging after retargeting`);
     }
-    assert.match(text, /releases\/tags\/\$FEED_STAGING_TAG" --jq '\.id'/);
+    assert.match(
+      text,
+      /gh release view "\$FEED_STAGING_TAG" --json databaseId --jq '\.databaseId'/,
+    );
     assert.match(
       text,
       /gh api --method DELETE "repos\/\$GITHUB_REPOSITORY\/releases\/\$staging_id"/,
     );
     assert.doesNotMatch(text, /--cleanup-tag/);
+  }
+});
+
+test("draft release cleanup resolves ids through gh release view", () => {
+  for (const { name, text } of workflows) {
+    assert.match(
+      text,
+      /gh release view "\$RELEASE_TAG" --json databaseId --jq '\.databaseId'/,
+      `${name} must resolve draft releases through the draft-aware CLI`,
+    );
+    assert.doesNotMatch(
+      text,
+      /releases\/tags\/\$(?:RELEASE_TAG|FEED_STAGING_TAG)/,
+      `${name} must not query draft releases through the published-tag endpoint`,
+    );
   }
 });
 
