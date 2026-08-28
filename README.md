@@ -38,7 +38,7 @@ npm run dev
 
 ## Windows updater
 
-Windows full-package downloads are written to `update-cache/<file>.partial`
+Windows update-package downloads are written to `update-cache/<file>.partial`
 beside Squirrel's managed `packages` directory and resume with HTTP Range after
 a network failure or app restart. Existing partial downloads from the former
 `packages` location are migrated automatically. The completed package is
@@ -46,6 +46,17 @@ checked against the size and SHA1 from `RELEASES` before Squirrel is allowed to
 install it. The verified package is then served to Squirrel from a tokenized
 loopback-only feed, so the native updater does not download the same GitHub
 asset a second time even if Squirrel recreates its `packages` directory.
+
+The feed publishes the latest full package plus a contiguous suffix of at most
+five delta packages. `delta-chain.json` records each delta's exact source and
+target version. During the update check, the client selects deltas only when it
+can build a complete path from the installed version to the latest version and
+the required deltas are smaller in total than the latest full package. A
+missing link, an older version outside the retained window, an invalid manifest,
+or a delta total that is not cheaper selects the full package before downloading
+starts. On the first rollout, feed preparation infers the newly generated delta's
+source from Squirrel's previous full package; later releases carry the exact chain
+forward through the published manifest.
 
 The update popup also provides an optional acceleration-prefix field. Values
 entered there are saved locally, may contain multiple HTTP(S) prefixes separated

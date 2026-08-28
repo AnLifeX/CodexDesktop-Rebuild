@@ -25,6 +25,69 @@ function readHttpBody(target) {
   });
 }
 
+async function runUpdaterCheck(t, { currentVersion, releaseLines, manifest }) {
+  const server = http.createServer((request, response) => {
+    if (request.url.startsWith("/RELEASES")) {
+      response.end(releaseLines.join("\n") + "\n");
+      return;
+    }
+    if (request.url.startsWith("/delta-chain.json") && manifest != null) {
+      response.end(JSON.stringify(manifest));
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const updateUrl = "http://127.0.0.1:" + server.address().port;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "updater-plan-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const appDir = path.join(root, "app-" + currentVersion);
+  fs.mkdirSync(appDir, { recursive: true });
+  fs.writeFileSync(path.join(root, "Update.exe"), "fixture");
+  const autoUpdater = new EventEmitter();
+  autoUpdater.setFeedURL = () => {};
+  autoUpdater.checkForUpdates = () => {};
+  const context = {
+    Buffer,
+    URL,
+    clearInterval,
+    clearTimeout,
+    console,
+    globalThis: null,
+    process: {
+      platform: "win32",
+      arch: "x64",
+      argv: ["Codex.exe"],
+      execPath: path.join(appDir, "Codex.exe"),
+      env: {
+        CODEX_REBUILD_UPDATE_URL: updateUrl,
+        CODEX_REBUILD_UPDATE_PROXY_PREFIXES: "",
+      },
+    },
+    require(id) {
+      if (id === "electron") {
+        return {
+          app: { isPackaged: true, getVersion: () => currentVersion, whenReady: () => Promise.resolve() },
+          autoUpdater,
+          dialog: {},
+          ipcMain: { handle() {} },
+          BrowserWindow: { getAllWindows: () => [] },
+        };
+      }
+      if (id === "../../package.json") return { codexRebuildWindowsUpdateUrl: updateUrl };
+      return require(id);
+    },
+    setInterval,
+    setTimeout,
+  };
+  context.globalThis = context;
+  vm.runInNewContext(makeBootstrapPrefix() + "void 0;\n}\n", context);
+  await new Promise((resolve) => setImmediate(resolve));
+  await context.__CodexRebuildUpdaterCommand.check();
+  return context.__CodexRebuildUpdaterLastState;
+}
+
 function withRealQuotedKeys(source) {
   return source
     .replaceAll("`aria-expanded`", "'aria-expanded'")
@@ -152,7 +215,7 @@ function snapshotLocalUpdaterTargets(asarRoot, relativePaths) {
   );
   assert.ok(bootstrap.includes("globalThis.__CodexRebuildUpdaterLastState=payload"));
   assert.ok(bootstrap.includes("globalThis.__CodexRebuildUpdaterMenuSetState?.(payload)"));
-  assert.ok(bootstrap.includes("setStatus('ready',{error:null,downloadedBytes:state.activeDownloadSize"));
+  assert.ok(bootstrap.includes("setStatus('ready',{error:null,downloadedBytes:state.updateSize"));
   assert.ok(!bootstrap.includes("let preview=kind=>{"));
   assert.ok(
     bootstrap.includes(
@@ -169,7 +232,9 @@ function snapshotLocalUpdaterTargets(asarRoot, relativePaths) {
       "startLocalHandoff(state.updateFiles,item,result.filePath,requestedProxyPrefixes,generation)",
     ),
   );
-  assert.ok(bootstrap.includes("let preferred=release.delta&&release.delta.size>0"));
+  assert.ok(bootstrap.includes("let selectReleasePlan=(items,manifestText,current)=>"));
+  assert.ok(bootstrap.includes("manifest.deltas.length>5"));
+  assert.ok(bootstrap.includes("total>=full.size"));
   assert.ok(bootstrap.includes("candidate=>candidate.kind==='full'"));
   assert.ok(bootstrap.includes("autoUpdater.setFeedURL({url:feedUrl})"));
   assert.ok(bootstrap.includes("http.createServer((request,response)=>"));
@@ -346,6 +411,92 @@ test("client updater compares rebuild revisions numerically and formats them sep
   assert.ok(makeMainMenuPatch().includes("replace(/-r0*([1-9]\\d*)$/i,' (r$1)')"));
 });
 
+test("query phase selects only a complete and cheaper delta path", async (t) => {
+  const full = {
+    fileName: "Codex-3.0.0-full.nupkg",
+    sha1: "f".repeat(40),
+    size: 100,
+    version: "3.0.0",
+  };
+  const delta2 = {
+    fileName: "Codex-2.0.0-delta.nupkg",
+    sha1: "a".repeat(40),
+    size: 10,
+    version: "2.0.0",
+  };
+  const delta3 = {
+    fileName: "Codex-3.0.0-delta.nupkg",
+    sha1: "b".repeat(40),
+    size: 11,
+    version: "3.0.0",
+  };
+  const releaseLines = [delta2, delta3, full].map(
+    (item) => item.sha1 + " " + item.fileName + " " + item.size,
+  );
+  const edge = (fromVersion, item) => ({
+    fileName: item.fileName,
+    fromVersion,
+    sha1: item.sha1,
+    size: item.size,
+    toVersion: item.version,
+  });
+  const manifest = {
+    schemaVersion: 1,
+    latestVersion: full.version,
+    full,
+    deltas: [edge("1.0.0", delta2), edge("2.0.0", delta3)],
+  };
+
+  const complete = await runUpdaterCheck(t, {
+    currentVersion: "1.0.0",
+    releaseLines,
+    manifest,
+  });
+  assert.equal(complete.updateMode, "delta-chain");
+  assert.equal(complete.updateFile, delta2.fileName);
+  assert.equal(complete.updateSize, delta2.size + delta3.size);
+  assert.equal(complete.updatePackageCount, 2);
+  assert.deepEqual(
+    Array.from(complete.updateFiles, (item) => item.fileName),
+    [delta2.fileName, delta3.fileName, full.fileName],
+  );
+
+  const outsideWindow = await runUpdaterCheck(t, {
+    currentVersion: "0.5.0",
+    releaseLines,
+    manifest,
+  });
+  assert.equal(outsideWindow.updateMode, "full");
+  assert.equal(outsideWindow.updateFile, full.fileName);
+  assert.equal(outsideWindow.updateSize, full.size);
+
+  const broken = await runUpdaterCheck(t, {
+    currentVersion: "1.0.0",
+    releaseLines,
+    manifest: { ...manifest, deltas: [edge("2.0.0", delta3)] },
+  });
+  assert.equal(broken.updateMode, "full");
+  assert.equal(broken.updateFile, full.fileName);
+
+  const expensive = await runUpdaterCheck(t, {
+    currentVersion: "1.0.0",
+    releaseLines: [
+      delta2.sha1 + " " + delta2.fileName + " 60",
+      delta3.sha1 + " " + delta3.fileName + " 50",
+      full.sha1 + " " + full.fileName + " " + full.size,
+    ],
+    manifest: {
+      ...manifest,
+      deltas: [
+        { ...edge("1.0.0", delta2), size: 60 },
+        { ...edge("2.0.0", delta3), size: 50 },
+      ],
+    },
+  });
+  assert.equal(expensive.updateMode, "full");
+  assert.equal(expensive.updateFile, full.fileName);
+});
+
 test("runtime downloader prefers delta and keeps a verified full fallback available", async (t) => {
   const releaseVersion = "2.0.0";
   const deltaBody = Buffer.from("small-delta-package");
@@ -356,6 +507,26 @@ test("runtime downloader prefers delta and keeps a verified full fallback availa
   const fullFileName = `Codex-${releaseVersion}-full.nupkg`;
   const packageRequests = [];
   const server = http.createServer((request, response) => {
+    if (request.url.startsWith("/delta-chain.json")) {
+      response.end(JSON.stringify({
+        schemaVersion: 1,
+        latestVersion: releaseVersion,
+        full: {
+          fileName: fullFileName,
+          sha1: fullSha1,
+          size: fullBody.length,
+          version: releaseVersion,
+        },
+        deltas: [{
+          fileName: deltaFileName,
+          fromVersion: "1.0.0",
+          sha1: deltaSha1,
+          size: deltaBody.length,
+          toVersion: releaseVersion,
+        }],
+      }));
+      return;
+    }
     if (request.url.startsWith("/RELEASES")) {
       response.end(
         `${fullSha1} ${fullFileName} ${fullBody.length}\n` +
@@ -1044,8 +1215,8 @@ test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appen
   const patched = patchWebviewMenuBarCode(source);
 
   assert.match(patched, /function codexRebuildUpdaterTitlebar\(\)/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v6/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v6/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v7/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v7/);
   const menuRoot = patched.indexOf("children:[(0,Ji.jsx)(`button`,{className:i,children:r}),null");
   const attachment = patched.indexOf("/* CodexRebuildUpdaterTitlebar:descriptor:start */");
   assert.ok(menuRoot >= 0 && attachment > menuRoot, "updater must be attached to the modern menu root");
@@ -1194,15 +1365,15 @@ test("rejects stale or mismatched canonical updater block versions", () => {
   );
 });
 
-test("migrates the v5 updater layers to the delta-aware local Squirrel handoff contract", () => {
-  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 6);
+test("migrates the v6 updater layers to the query-time delta-chain contract", () => {
+  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 7);
   const current = applyLocalUpdaterPlan(makeCleanLocalUpdaterSources());
   const legacy = {
     packageSource: current.packageSource,
     files: Object.fromEntries(
       Object.entries(current.files).map(([file, source]) => [
         file,
-        source.replaceAll(":v6 */", ":v5 */"),
+        source.replaceAll(":v7 */", ":v6 */"),
       ]),
     ),
   };
@@ -1215,7 +1386,7 @@ test("migrates the v5 updater layers to the delta-aware local Squirrel handoff c
   );
   assert.ok(
     Object.values(migrated.files).every(
-      (source) => !source.includes(":v5 */"),
+      (source) => !source.includes(":v6 */"),
     ),
   );
   assert.equal(planLocalUpdaterSources(migrated).status, "already");

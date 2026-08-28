@@ -19,8 +19,8 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 6;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5];
+const LOCAL_UPDATER_CONTRACT_VERSION = 7;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6];
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";
@@ -296,7 +296,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
   };
   let parseReleaseVersion=name=>name?.match(/^Codex-(.+?)-(?:full|delta)\\.nupkg$/i)?.[1]||null;
   let parseReleases=text=>{
-    let byVersion=new Map();
+    let items=[];
     for(let line of String(text||'').split(/\\r?\\n/)){
       let parts=line.trim().split(/\\s+/);
       if(parts.length<3)continue;
@@ -306,22 +306,40 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       if(!kind)continue;
       let version=parseReleaseVersion(fileName);
       if(!version||!Number.isFinite(size))continue;
-      let release=byVersion.get(version)||{version,fileName:null,size:null,sha1:null,files:[],full:null,delta:null};
-      let item={fileName,size,kind,sha1};
-      release.files.push(item);
-      release[kind]=item;
-      byVersion.set(version,release);
+      items.push({fileName,size,kind,sha1,version});
     }
-    let best=null;
-    for(let release of byVersion.values()){
-      if(!release.full)continue;
-      let preferred=release.delta&&release.delta.size>0&&release.delta.size<release.full.size?release.delta:release.full;
-      release.fileName=preferred.fileName;
-      release.size=preferred.size;
-      release.sha1=preferred.sha1;
-      if(best==null||compareVersions(release.version,best.version)>0)best=release;
+    return items;
+  };
+  let selectReleasePlan=(items,manifestText,current)=>{
+    let full=null;
+    for(let item of items){
+      if(item.kind==='full'&&(full==null||compareVersions(item.version,full.version)>0))full=item;
     }
-    return best;
+    if(!full)return null;
+    let fullPlan={version:full.version,fileName:full.fileName,size:full.size,sha1:full.sha1,files:[full],mode:'full',packageCount:1};
+    let manifest;
+    try{manifest=JSON.parse(String(manifestText||''))}catch{return fullPlan}
+    if(manifest?.schemaVersion!==1||manifest.latestVersion!==full.version||!Array.isArray(manifest.deltas)||manifest.deltas.length>5)return fullPlan;
+    if(manifest.full?.fileName!==full.fileName||manifest.full?.sha1!==full.sha1||manifest.full?.size!==full.size||manifest.full?.version!==full.version)return fullPlan;
+    let edges=[];
+    for(let edge of manifest.deltas){
+      if(!edge||typeof edge.fromVersion!=='string'||typeof edge.toVersion!=='string'||typeof edge.fileName!=='string'||edges.some(candidate=>compareVersions(candidate.fromVersion,edge.fromVersion)===0))return fullPlan;
+      edges.push(edge);
+    }
+    let cursor=current,chain=[],total=0,seen=new Set;
+    while(compareVersions(cursor,full.version)<0){
+      if(chain.length>=5||seen.has(cursor))return fullPlan;
+      seen.add(cursor);
+      let edge=edges.find(candidate=>compareVersions(candidate.fromVersion,cursor)===0);
+      if(!edge||compareVersions(edge.toVersion,cursor)<=0||compareVersions(edge.toVersion,full.version)>0)return fullPlan;
+      let item=items.find(candidate=>candidate.kind==='delta'&&candidate.version===edge.toVersion&&candidate.fileName===edge.fileName&&candidate.sha1===edge.sha1&&candidate.size===edge.size);
+      if(!item)return fullPlan;
+      chain.push(item);
+      total+=item.size;
+      cursor=edge.toVersion;
+    }
+    if(compareVersions(cursor,full.version)!==0||chain.length===0||total>=full.size)return fullPlan;
+    return{version:full.version,fileName:chain[0].fileName,size:total,sha1:chain[0].sha1,files:[...chain,full],mode:'delta-chain',packageCount:chain.length};
   };
   let fetchText=(target,redirects=0)=>new Promise((resolve,reject)=>{
     let client=target.startsWith('http:')?http:https;
@@ -358,6 +376,11 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     u.searchParams.set('id','Codex');
     u.searchParams.set('localVersion',getInstalledVersion()||'');
     u.searchParams.set('arch',process.arch==='x64'?'amd64':process.arch);
+    u.searchParams.set('t',String(Date.now()));
+    return u.toString();
+  };
+  let deltaChainUrl=()=>{
+    let u=new urlMod.URL(updateUrl.replace(/\\/+$/,'')+'/delta-chain.json');
     u.searchParams.set('t',String(Date.now()));
     return u.toString();
   };
@@ -623,6 +646,8 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     updateFile:null,
     updateFiles:null,
     updateSize:null,
+    updateMode:null,
+    updatePackageCount:null,
     activeDownloadFile:null,
     activeDownloadSize:null,
     downloadedBytes:null,
@@ -710,9 +735,13 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     checking=!0;
     setStatus('checking',{error:null,version:getInstalledVersion()});
     try{
-      let release=parseReleases(await fetchText(releasesUrl()));
-      checking=!1;
       let current=getInstalledVersion();
+      let [releaseText,manifestText]=await Promise.all([
+        fetchText(releasesUrl()),
+        fetchText(deltaChainUrl()).catch(()=>null),
+      ]);
+      let release=selectReleasePlan(parseReleases(releaseText),manifestText,current);
+      checking=!1;
       if(release&&compareVersions(release.version,current)>0){
         setStatus('available',{
           error:null,
@@ -721,6 +750,8 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
           updateFile:release.fileName,
           updateFiles:release.files||null,
           updateSize:release.size,
+          updateMode:release.mode,
+          updatePackageCount:release.packageCount,
           activeDownloadFile:null,
           activeDownloadSize:null,
           downloadedBytes:null,
@@ -738,6 +769,8 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
           updateFile:null,
           updateFiles:null,
           updateSize:null,
+          updateMode:null,
+          updatePackageCount:null,
           activeDownloadFile:null,
           activeDownloadSize:null,
           downloadedBytes:null,
@@ -838,7 +871,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     downloading=!1;
     downloadRequested=!1;
     stopProgress();
-    setStatus('idle',{error:null,updateVersion:null,updateFile:null,updateFiles:null,updateSize:null,activeDownloadFile:null,activeDownloadSize:null,downloadedBytes:null,resumedBytes:null,downloadSource:null,downloadStartedAt:null,elapsedMs:null});
+    setStatus('idle',{error:null,updateVersion:null,updateFile:null,updateFiles:null,updateSize:null,updateMode:null,updatePackageCount:null,activeDownloadFile:null,activeDownloadSize:null,downloadedBytes:null,resumedBytes:null,downloadSource:null,downloadStartedAt:null,elapsedMs:null});
     return emit();
   };
   globalThis.__CodexRebuildUpdaterCommand={check:()=>checkOnly(!0),download:startDownload,retry:options=>state.updateFile?startDownload(options):checkOnly(!0),cancel:cancelDownload,install:installUpdate,clear:clearStatus};
@@ -897,7 +930,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     if(downloaded)return;
     downloaded=!0;
     closeLocalHandoff(!0);
-    setStatus('ready',{error:null,downloadedBytes:state.activeDownloadSize??state.updateSize??state.downloadedBytes,lastCheckedAt:Date.now()});
+    setStatus('ready',{error:null,downloadedBytes:state.updateSize??state.activeDownloadSize??state.downloadedBytes,lastCheckedAt:Date.now()});
   });
   try{autoUpdater.setFeedURL({url:updateUrl})}catch(e){console.warn(\`[CodexRebuildUpdater] invalid update feed\`,e&&e.message?e.message:e);return}
   let firstDelay=process.argv.includes(\`--squirrel-firstrun\`)?30000:10000;

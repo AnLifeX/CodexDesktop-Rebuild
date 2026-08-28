@@ -186,3 +186,33 @@ test("manual and scheduled releases reject mutable or rollback feed state before
     assert.match(text, /404\) : > "\$remote_releases"/);
   }
 });
+
+test("Windows update feeds carry forward and publish bounded delta-chain metadata", () => {
+  for (const { name, text } of workflows) {
+    assert.match(
+      text,
+      /curl\.exe --silent --show-error --location `[\s\S]*?\/delta-chain\.json\?build=/,
+      `${name} must query the currently published delta chain before preparing the next feed`,
+    );
+    assert.match(
+      text,
+      /\$args \+= @\("--previous-manifest", \$previousManifest\)/,
+      `${name} must carry the previous chain into feed preparation`,
+    );
+    assert.match(
+      text,
+      /--pattern 'delta-chain\.json'/,
+      `${name} must preserve the manifest through the staging draft`,
+    );
+    assert.match(
+      text,
+      /printf 'delta-chain\.json\\n'/,
+      `${name} must include the manifest in the exact stable-feed asset set`,
+    );
+    assert.match(
+      text,
+      /gh release upload "\$tag" "\$feed_dir\/delta-chain\.json" --clobber/,
+      `${name} must publish the manifest atomically with RELEASES and packages`,
+    );
+  }
+});
