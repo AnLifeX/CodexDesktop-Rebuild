@@ -231,7 +231,25 @@ jobs:
           }
 
       - name: Prepare Windows update feed artifact
-        run: node scripts/prepare-windows-update-feed.js --source out/make/squirrel.windows/x64 --dest out/update-feed
+        shell: pwsh
+        run: |
+          $previousManifest = Join-Path $env:RUNNER_TEMP "previous-delta-chain.json"
+          $status = curl.exe --silent --show-error --location `
+            --output $previousManifest `
+            --write-out "%{http_code}" `
+            "${{ env.WINDOWS_UPDATE_FEED }}/delta-chain.json?build=${{ github.run_id }}-${{ github.run_attempt }}"
+          $args = @(
+            "scripts/prepare-windows-update-feed.js",
+            "--source", "out/make/squirrel.windows/x64",
+            "--dest", "out/update-feed"
+          )
+          if ($status -eq "200") {
+            $args += @("--previous-manifest", $previousManifest)
+          } elseif ($status -ne "404") {
+            throw "Unable to read previous delta chain manifest: HTTP $status"
+          }
+          & node @args
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Validate Windows update feed artifact
         run: node scripts/validate-windows-release-feed.js --root out/update-feed --version "${{ steps.windows_artifacts.outputs.windows_package_version }}"
@@ -341,6 +359,7 @@ jobs:
             --dir update-feed \
             --pattern '*.nupkg' \
             --pattern 'RELEASES' \
+            --pattern 'delta-chain.json' \
             --clobber
           if [ ! -f artifacts/windows-release-metadata.json ]; then
             node scripts/windows-release-metadata.js \
@@ -488,9 +507,11 @@ jobs:
           (
             find "$feed_dir" -maxdepth 1 -type f -name '*.nupkg' -printf '%f\n'
             printf 'RELEASES\n'
+            printf 'delta-chain.json\n'
           ) | sort > "$desired_assets"
           gh release upload "$tag" "$feed_dir"/*.nupkg --clobber
           gh release upload "$tag" "$feed_dir/RELEASES" --clobber
+          gh release upload "$tag" "$feed_dir/delta-chain.json" --clobber
           gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r asset; do
             if ! grep -Fxq "$asset" "$desired_assets"; then
               gh release delete-asset "$tag" "$asset" -y
