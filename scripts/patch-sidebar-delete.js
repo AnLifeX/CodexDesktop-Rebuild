@@ -1217,11 +1217,29 @@ function analyzeArchiveHandlerLifecycle(code, handler) {
   };
 }
 
-function analyzeRowFunction(code, node, hoverFunctionName) {
+function hasSidebarRowOwnershipSignature(source) {
+  return (
+    source.includes("archive-thread") ||
+    (
+      source.includes("sidebar_context_menu") &&
+      (source.includes(".archiveThread") || source.includes("archiveThread:"))
+    )
+  );
+}
+
+function hasSidebarRowSignature(source) {
+  return (
+    source.includes("additionalHoverActionCount") &&
+    hasSidebarRowOwnershipSignature(source)
+  );
+}
+
+function analyzeRowFunction(code, node, hoverFunctionName, hoverMessages) {
   const hookPatterns = [];
   const stateDeclarations = [];
   const archiveHandlers = sidebarArchiveHandlers(code, node);
   const archiveItems = [];
+  const menuFactoryCalls = [];
   const hoverRenders = [];
   const hoverCounts = [];
   const useCallbacks = [];
@@ -1243,6 +1261,19 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
       );
       if (hoverCount) hoverCounts.push({ object: inner, property: hoverCount });
     }
+    if (inner.type === "CallExpression") {
+      const options = inner.arguments.find((argument) => argument?.type === "ObjectExpression");
+      if (options) {
+        const names = options.properties.map(propertyName);
+        const surface = objectProperty(options, "surface")?.value;
+        if (
+          literalValue(surface) === "sidebar" &&
+          ["actions", "onArchive", "target"].every((name) => names.includes(name))
+        ) {
+          menuFactoryCalls.push(inner);
+        }
+      }
+    }
     const jsxAlias = sequenceMemberAlias(inner, "jsx");
     if (
       jsxAlias &&
@@ -1257,7 +1288,7 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     hookPatterns.length !== 1 ||
     stateDeclarations.length < 1 ||
     archiveHandlers.length !== 1 ||
-    archiveItems.length !== 1 ||
+    archiveItems.length + menuFactoryCalls.length !== 1 ||
     hoverRenders.length !== 1 ||
     hoverCounts.length !== 1
   ) throw new Error("sidebar row structure is incomplete");
@@ -1297,10 +1328,10 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     if (!property) throw new Error(`sidebar archive handler ${name} is missing`);
     return sourceFor(code, property.value);
   };
-  const archiveMessage = archiveItems[0].properties.find((property) => propertyName(property) === "message");
+  const archiveMessage = archiveItems[0]?.properties.find((property) => propertyName(property) === "message");
   let messageObject = archiveMessage?.value.type === "MemberExpression"
     ? sourceFor(code, archiveMessage.value.object)
-    : null;
+    : hoverMessages ?? null;
   if (messageObject == null) {
     const messageObjects = new Set();
     walk(node, (inner) => {
@@ -1318,7 +1349,9 @@ function analyzeRowFunction(code, node, hoverFunctionName) {
     hookPattern: hookPatterns[0],
     stateDeclaration: stateDeclarations[0],
     handler,
-    archiveItem: archiveItems[0],
+    menuInsertion: archiveItems.length === 1
+      ? { kind: "after", node: archiveItems[0] }
+      : { kind: "wrap", node: menuFactoryCalls[0] },
     messageObject,
     hoverRender: render,
     callbackDependencies,
@@ -1867,7 +1900,7 @@ function patchSidebarSource(code) {
     ) {
       hoverFunctions.push(node);
     }
-    if (source.includes("archive-thread") && source.includes("additionalHoverActionCount")) {
+    if (hasSidebarRowSignature(source)) {
       broadRowFunctions.push(node);
     }
   });
@@ -1897,7 +1930,7 @@ function patchSidebarSource(code) {
 
   const hover = analyzeHoverFunction(code, hoverFunction);
   const rowFunction = rowFunctions[0];
-  const row = analyzeRowFunction(code, rowFunction, hoverFunction.id.name);
+  const row = analyzeRowFunction(code, rowFunction, hoverFunction.id.name, hover.messages);
   const renderComponent = sourceFor(code, hover.render.call.arguments[0]);
   const className = sourceFor(code, hover.render.className);
   const deleteActions =
@@ -1916,6 +1949,18 @@ function patchSidebarSource(code) {
     throw new Error("sidebar row has duplicate dataAttributes props");
   }
   const resetDataAttributes = resetDataAttributesSource(code, row.hoverCount.object);
+  const deleteMenuItem = `{id:\`delete-thread\`,message:${row.messageObject}.deleteThread,onSelect:CodexRequestDelete}`;
+  const menuReplacement = row.menuInsertion.kind === "after"
+    ? {
+      start: row.menuInsertion.node.end,
+      end: row.menuInsertion.node.end,
+      text: `,${deleteMenuItem}`,
+    }
+    : {
+      start: row.menuInsertion.node.start,
+      end: row.menuInsertion.node.end,
+      text: `[...${sourceFor(code, row.menuInsertion.node)},${deleteMenuItem}]`,
+    };
   return [
     { start: hover.pattern.end - 1, end: hover.pattern.end - 1, text: ",deleteAction:CodexDeleteAction" },
     {
@@ -1943,11 +1988,7 @@ function patchSidebarSource(code) {
       end: row.stateDeclaration.end,
       text: `,[CodexDeleteConfirm,CodexSetDeleteConfirm]=${stateInit}`,
     },
-    {
-      start: row.archiveItem.end,
-      end: row.archiveItem.end,
-      text: `,{id:\`delete-thread\`,message:${row.messageObject}.deleteThread,onSelect:CodexRequestDelete}`,
-    },
+    menuReplacement,
     {
       start: renderObject.end - 1,
       end: renderObject.end - 1,
@@ -2073,7 +2114,7 @@ function inspectSidebarLayer(code) {
     ) {
       hoverFunctions.push(node);
     }
-    if (source.includes("archive-thread") && source.includes("additionalHoverActionCount")) {
+    if (hasSidebarRowOwnershipSignature(source)) {
       rowFunctions.push(node);
     }
   });
@@ -2215,7 +2256,7 @@ function sidebarUiOwnershipEvidence(code) {
         continue;
       }
       const source = sourceFor(code, row);
-      if (!source.includes("archive-thread")) {
+      if (!hasSidebarRowOwnershipSignature(source)) {
         continue;
       }
       let rendersHover = false;
@@ -2246,7 +2287,7 @@ function sidebarUiOwnershipEvidence(code) {
 function probeSidebarUi(candidate) {
   if (
     !candidate.source.includes("thread-primary-action") ||
-    !candidate.source.includes("archive-thread")
+    !hasSidebarRowOwnershipSignature(candidate.source)
   ) {
     return { state: "irrelevant", evidence: [] };
   }
@@ -2460,8 +2501,7 @@ function findWindowsSidebarTargets(directory) {
       (source.includes("archive-conversation") || source.includes("archiveConversation("));
     const isSidebar =
       source.includes("thread-primary-action") &&
-      source.includes("archive-thread") &&
-      source.includes("additionalHoverActionCount");
+      hasSidebarRowSignature(source);
     if (!isThreadActions && !isSidebar) continue;
     const candidate = { fileName, path: filePath, source };
     if (isThreadActions) threadActionTargets.push(candidate);

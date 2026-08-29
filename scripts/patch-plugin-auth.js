@@ -1286,39 +1286,45 @@ function collectMainDefaults(source, ast, model) {
     }
   }
 
-  if (jsReplObjects.length !== 1) {
+  if (jsReplObjects.length > 1) {
     throw new Error(
-      `plugin defaults features.js_repl expected exactly 1 object, found ${jsReplObjects.length}`,
+      `plugin defaults features.js_repl expected at most 1 object, found ${jsReplObjects.length}`,
     );
   }
-  const jsReplObject = jsReplObjects[0];
-  const jsReplProperties = jsReplObject.properties.filter(
-    (property) =>
-      (property.key?.name ?? property.key?.value) === "features.js_repl",
-  );
-  if (
-    jsReplObject.node.properties.length !== 1 ||
-    jsReplProperties.length !== 1
-  ) {
-    throw new Error("plugin defaults features.js_repl expected an exact singleton object");
-  }
-  const jsRepl = jsReplProperties[0];
-  const jsReplValue = source.slice(jsRepl.value.start, jsRepl.value.end);
-  if (jsReplValue === "!1") {
-    patches.push({
-      id: "feature_js_repl",
-      start: jsRepl.value.start,
-      end: jsRepl.value.end,
-      original: jsReplValue,
-      replacement: "!0",
-    });
-  } else if (jsReplValue === "!0") {
-    already.push(jsRepl.value.start);
-  } else {
-    throw new Error("plugin defaults features.js_repl expected exactly !1 or !0");
+  if (jsReplObjects.length === 1) {
+    const jsReplObject = jsReplObjects[0];
+    const jsReplProperties = jsReplObject.properties.filter(
+      (property) =>
+        (property.key?.name ?? property.key?.value) === "features.js_repl",
+    );
+    if (
+      jsReplObject.node.properties.length !== 1 ||
+      jsReplProperties.length !== 1
+    ) {
+      throw new Error("plugin defaults features.js_repl expected an exact singleton object");
+    }
+    const jsRepl = jsReplProperties[0];
+    const jsReplValue = source.slice(jsRepl.value.start, jsRepl.value.end);
+    if (jsReplValue === "!1") {
+      patches.push({
+        id: "feature_js_repl",
+        start: jsRepl.value.start,
+        end: jsRepl.value.end,
+        original: jsReplValue,
+        replacement: "!0",
+      });
+    } else if (jsReplValue === "!0") {
+      already.push(jsRepl.value.start);
+    } else {
+      throw new Error("plugin defaults features.js_repl expected exactly !1 or !0");
+    }
   }
 
-  return { patches: dedupePatches(patches), already: new Set(already).size };
+  return {
+    patches: dedupePatches(patches),
+    already: new Set(already).size,
+    total: FEATURE_KEYS.length + jsReplObjects.length,
+  };
 }
 
 function collectMainFilter(source, ast, comments, model) {
@@ -1495,7 +1501,7 @@ function patchPluginMainSource(source) {
   const filter = collectMainFilter(source, ast, comments, model);
   const peer = collectMainPeer(source, ast);
   const counts = {
-    defaults: makeCount(defaults.patches.length, defaults.already, FEATURE_KEYS.length + 1, "plugin defaults"),
+    defaults: makeCount(defaults.patches.length, defaults.already, defaults.total, "plugin defaults"),
     filter: makeCount(filter.patches.length, filter.already, 1, "plugin bundled filter"),
     peer: makeCount(peer.patches.length, peer.already, 1, "plugin peer auth"),
   };
