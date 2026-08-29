@@ -18,7 +18,7 @@ permissions:
 
 env:
   WINDOWS_UPDATE_TAG: windows-update-feed
-  WINDOWS_UPDATE_FEED: "https://github.com/Gaq152/CodexDesktop-Rebuild/releases/download/windows-update-feed"
+  WINDOWS_UPDATE_FEED: "https://github.com/anlifex/CodexDesktop-Rebuild/releases/download/windows-update-feed"
 
 concurrency:
   group: codex-windows-release-state

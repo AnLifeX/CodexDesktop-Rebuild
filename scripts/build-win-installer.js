@@ -397,7 +397,7 @@ async function main() {
     noMsi: true,
     skipUpdateIcon: true,
     setupIcon: path.join(PROJECT_ROOT, "resources", "electron.ico"),
-    iconUrl: "https://raw.githubusercontent.com/Gaq152/CodexDesktop-Rebuild/master/resources/electron.ico",
+    iconUrl: "https://raw.githubusercontent.com/anlifex/CodexDesktop-Rebuild/master/resources/electron.ico",
     noDelta: squirrelReleaseOptions.noDelta,
     remoteReleases: squirrelReleaseOptions.remoteReleases,
   });
