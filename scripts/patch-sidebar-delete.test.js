@@ -26,6 +26,11 @@ const LATEST_SIDEBAR = [
   "function jc({conversationId:e,showPinActionOnHover:a=!1,canPin:i=!0,threadSummary:_=null}){let b=o(m),[S,C]=(0,Pc.useState)(!1),w=L(),{archiveThread:F,markThreadAsRead:R}=wr(),{beginArchive:ne,handleArchiveSuccess:re,handleArchiveError:ie}=Na({}),we=()=>{ne(),F({conversationId:e,hostId:_?.hostId,source:`sidebar_context_menu`,onArchiveSuccess:re,onArchiveError:ie})},Te=le(()=>{we()}),je=le(()=>[{id:`archive-thread`,message:Sr.archiveThread,onSelect:Te}]),Me=a&&i,Ne=(0,Pc.useCallback)(({archive:t})=>(0,Fc.jsx)(Ac,{archive:t,pinAction:Me?{ariaLabel:w.formatMessage(Eo),isPinned:!1,onClick:()=>{}}:void 0}),[Te,w,e,b,Me]);let Pe=(0,Fc.jsx)(Ma,{additionalHoverActionCount:Me?1:0,renderActions:Ne});return(0,Fc.jsx)(me,{getItems:je,children:Pe})}",
 ].join(";");
 
+const LATEST_MENU_FACTORY_SIDEBAR = [
+  "function Ac(e){let t=(0,Nc.c)(16),{archive:n,getMenuItems:r,onMenuOpenChange:i,pinAction:a}=e,o=L();if(n==null&&a==null&&r==null)return null;let s=a==null?[]:[{id:`thread-pin-action`,ariaLabel:a.ariaLabel,onClick:a.onClick}],c=n==null||r!=null?[]:[{id:`thread-primary-action`,ariaLabel:o.formatMessage(Sr.archiveThread),icon:(0,Fc.jsx)(Aa,{}),onClick:n}];let l;l=[...s,...c];let u;return(0,Fc.jsx)(oc,{actions:l,className:Pa})}",
+  "function jc({conversationId:e,showPinActionOnHover:a=!1,canPin:i=!0,threadSummary:_=null}){let b=o(m),[S,C]=(0,Pc.useState)(!1),w=L(),re=wr(),{archiveThread:F,markThreadAsRead:R}=re,{beginArchive:ne,handleArchiveSuccess:se,handleArchiveError:ie}=Na({}),we=()=>{ne(),F({conversationId:e,hostId:_?.hostId,source:`sidebar_context_menu`,onArchiveSuccess:se,onArchiveError:ie})},Te=le(()=>{we()}),je=()=>menuFactory({scope:b,surface:`sidebar`,isUnread:!1,target:{conversationId:e,hostId:_?.hostId},actions:re,canPin:i,onRename:()=>{},onArchive:Te}),items=le(je),Me=a&&i,Ne=(0,Pc.useCallback)(({archive:t})=>(0,Fc.jsx)(Ac,{archive:t,getMenuItems:()=>items(),pinAction:Me?{ariaLabel:w.formatMessage(Eo),isPinned:!1,onClick:()=>{}}:void 0}),[Te,w,e,b,Me]);let Pe=(0,Fc.jsx)(Ma,{additionalHoverActionCount:Me?1:0,renderActions:Ne});return(0,Fc.jsx)(me,{getItems:items,children:Pe})}",
+].join(";");
+
 const PENDING_TASK_DECOY =
   "function Sd(e){let i=()=>[{id:`archive-thread`,message:Sr.archiveThread,onSelect:()=>{}}],p=l&&B;return(0,Ad.jsx)(Ua,{additionalHoverActionCount:p?1:0,renderActions:q?Ed:e=>{let{archive:n,requestArchive:r}=e;return(0,Ad.jsx)(Dd,{archive:n,requestArchive:r})}})}";
 
@@ -164,6 +169,19 @@ test("adds delete and inline-confirmation actions to the latest sidebar aliases 
       ),
     /sidebar hover\/row marker postcondition is malformed|sidebar hover.*expected exactly 1.*found 2/i,
   );
+});
+
+test("adds deletion to the latest sidebar menu-factory row without a literal archive item", () => {
+  assert.doesNotMatch(LATEST_MENU_FACTORY_SIDEBAR, /id:`archive-thread`/);
+  const first = patchSidebarSource(LATEST_MENU_FACTORY_SIDEBAR);
+  assert.equal(first.status, "patched");
+  assert.match(first.code, /\[\.\.\.menuFactory\(\{[^;]+\),\{id:`delete-thread`/);
+  assert.match(first.code, /message:Sr\.deleteThread/);
+  assert.match(first.code, /deleteAction:\{confirming:CodexDeleteConfirm/);
+  assert.match(first.code, /onDeleteStart:\(\)=>\{ne\(\)\}/);
+  const second = patchSidebarSource(first.code);
+  assert.equal(second.status, "already");
+  assert.equal(second.code, first.code);
 });
 
 test("patches current native thread actions without depending on a compressed manager name", () => {

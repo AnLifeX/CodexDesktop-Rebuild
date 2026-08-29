@@ -156,6 +156,20 @@ test("rejects main-only, missing, and ambiguous plugin contracts", () => {
   );
 });
 
+test("accepts the latest desktop defaults after upstream removed features.js_repl", () => {
+  const withoutJsRepl = LATEST_MAIN_FIXTURE.replace(
+    'let fr={"features.js_repl":!1};',
+    "",
+  );
+  assert.notEqual(withoutJsRepl, LATEST_MAIN_FIXTURE);
+  const first = patchPluginMainSource(withoutJsRepl);
+  assert.deepEqual(first.counts.defaults, { patchable: 9, already: 0, total: 9 });
+  assert.doesNotMatch(first.code, /features\.js_repl/);
+  const second = patchPluginMainSource(first.code);
+  assert.deepEqual(second.counts.defaults, { patchable: 0, already: 9, total: 9 });
+  assert.equal(second.status, "already");
+});
+
 test("ignores unrelated auth comparisons outside exported plugin hook return flow", () => {
   const detachedFastMode =
     "function fastSettings(e,r){let allowed=e.authMethod===`chatgpt`;return allowed&&r.requirements.featureRequirements.fast_mode}";
