@@ -17,7 +17,7 @@ on:
 env:
   NODE_VERSION: "24"
   WINDOWS_UPDATE_TAG: "windows-update-feed"
-  WINDOWS_UPDATE_FEED: "https://github.com/Gaq152/CodexDesktop-Rebuild/releases/download/windows-update-feed"
+  WINDOWS_UPDATE_FEED: "https://github.com/anlifex/CodexDesktop-Rebuild/releases/download/windows-update-feed"
 
 permissions:
   contents: read

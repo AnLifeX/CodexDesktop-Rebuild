@@ -13,7 +13,7 @@ const acorn = require("acorn");
 const { SRC_DIR } = require("./patch-util");
 
 const DEFAULT_WINDOWS_UPDATE_URL =
-  "https://github.com/Gaq152/CodexDesktop-Rebuild/releases/download/windows-update-feed";
+  "https://github.com/anlifex/CodexDesktop-Rebuild/releases/download/windows-update-feed";
 const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://ghfast.top/",
   "https://gh-proxy.com/",

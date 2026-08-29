@@ -2,6 +2,10 @@
 
 Cross-platform Electron build for OpenAI Codex Desktop App.
 
+- Repository: [anlifex/CodexDesktop-Rebuild](https://github.com/anlifex/CodexDesktop-Rebuild)
+- Releases: [GitHub Releases](https://github.com/anlifex/CodexDesktop-Rebuild/releases)
+- Windows update feed: [windows-update-feed](https://github.com/anlifex/CodexDesktop-Rebuild/releases/tag/windows-update-feed)
+
 ## Supported Platforms
 
 | Platform | Architecture | Status |
@@ -97,9 +101,10 @@ must still match the direct `RELEASES` manifest.
 
 ## CI/CD
 
-GitHub Actions automatically builds on:
-- Push to `master`
-- Tag `v*` → Creates draft release
+GitHub Actions runs the Windows upstream sync every day at `08:30 UTC`
+(`16:30 Asia/Shanghai`) and builds when an upstream version change is detected.
+Windows builds, delta-package tests, and release promotion can also be started
+manually through `workflow_dispatch`.
 
 ## Credits
 

@@ -3,6 +3,14 @@
   "productName": "Codex",
   "version": "26.820.71523",
   "description": "Codex Electron App - Cross-platform Build",
+  "homepage": "https://github.com/anlifex/CodexDesktop-Rebuild",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anlifex/CodexDesktop-Rebuild.git"
+  },
+  "bugs": {
+    "url": "https://github.com/anlifex/CodexDesktop-Rebuild/issues"
+  },
   "main": "src/.vite/build/bootstrap.js",
   "scripts": {
     "start": "node scripts/start-dev.js",
@@ -69,7 +77,7 @@
   "codexBuildNumber": "5059",
   "codexSparkleFeedUrl": "https://persistent.oaistatic.com/codex-app-prod/appcast.xml",
   "codexSparklePublicKey": "rhcBvttuqDFriyNqwTQJR3L4UT1WjIK4QxtwtwusVic=",
-  "codexRebuildWindowsUpdateUrl": "https://github.com/Gaq152/CodexDesktop-Rebuild/releases/download/windows-update-feed",
+  "codexRebuildWindowsUpdateUrl": "https://github.com/anlifex/CodexDesktop-Rebuild/releases/download/windows-update-feed",
   "codexRebuildWindowsUpdateProxyPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
