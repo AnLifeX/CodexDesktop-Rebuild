@@ -70,10 +70,14 @@ jobs:
           gh release download "$release_tag" --dir artifacts/portable --pattern "Codex-win-x64-$RELEASE_VERSION.zip" --clobber
           gh release download "$release_tag" --dir artifacts/metadata --pattern "windows-release-metadata.json" --clobber
           gh release download "$feed_staging_tag" --dir artifacts/update-feed --pattern '*.nupkg' --pattern 'RELEASES' --clobber
-          release_json="$(gh release view "$release_tag" --json isDraft,assets)"
-          feed_json="$(gh release view "$feed_staging_tag" --json isDraft,assets)"
+          release_json="$(gh release view "$release_tag" --json isDraft,assets,body)"
+          feed_json="$(gh release view "$feed_staging_tag" --json isDraft,assets,body)"
           test "$(jq -r '.isDraft' <<<"$release_json")" = true
           test "$(jq -r '.isDraft' <<<"$feed_json")" = true
+          test "$(jq -r '.body' <<<"$release_json")" != null
+          test "$(jq -r '.body' <<<"$feed_json")" != null
+          grep -Fq "<!-- codex-rebuild-run-id:${SOURCE_RUN_ID} -->" <<<"$(jq -r '.body' <<<"$release_json")"
+          grep -Fq "<!-- codex-rebuild-run-id:${SOURCE_RUN_ID} -->" <<<"$(jq -r '.body' <<<"$feed_json")"
           run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$SOURCE_RUN_ID")"
           test "$(jq -r '.conclusion' <<<"$run_json")" = success
           test "$(jq -r '.path' <<<"$run_json")" = ".github/workflows/build.yml"

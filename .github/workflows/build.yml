@@ -273,6 +273,27 @@ jobs:
           & node @args
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Generate Windows release notes
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.windows_version.outputs.windows_internal_app_version }}
+          MSIX_VERSION: ${{ steps.windows_version.outputs.windows_upstream_version }}
+          CLI_VERSION: ${{ steps.codex_cli.outputs.codex_cli_version }}
+          RELEASE_VERSION: ${{ steps.windows_version.outputs.windows_release_version }}
+          PORTABLE_VERSION: ${{ steps.windows_artifacts.outputs.windows_portable_version }}
+          INSTALLER_VERSION: ${{ steps.windows_artifacts.outputs.windows_installer_version }}
+        run: |
+          node scripts/generate-windows-release-notes.js `
+            --write out/windows-release-notes.md `
+            --previous scripts/upstream-versions.json `
+            --app-version $env:APP_VERSION `
+            --msix-version $env:MSIX_VERSION `
+            --cli-version $env:CLI_VERSION `
+            --release-version $env:RELEASE_VERSION `
+            --portable-name "Codex-win-x64-$env:PORTABLE_VERSION.zip" `
+            --installer-name "CodexSetup-win-x64-$env:INSTALLER_VERSION.zip" `
+            --source-run-id "${{ github.run_id }}"
+
       - name: Upload Windows assets to draft release
         if: inputs.replace_existing_release != true
         uses: softprops/action-gh-release@v3
@@ -280,14 +301,7 @@ jobs:
           tag_name: codex-win-${{ steps.windows_artifacts.outputs.windows_installer_version }}
           name: Codex Win ${{ steps.windows_artifacts.outputs.windows_installer_version }}
           target_commitish: master
-          body: |
-            Windows-only rebuild from official Codex `${{ steps.windows_version.outputs.windows_internal_app_version }}` (MSIX `${{ steps.windows_version.outputs.windows_upstream_version }}`).
-            - Bundled Codex CLI: `${{ steps.codex_cli.outputs.codex_cli_version }}` (matched from the official MSIX).
-            - Portable: `Codex-win-x64-${{ steps.windows_artifacts.outputs.windows_portable_version }}.zip`
-            - Installer: `CodexSetup-win-x64-${{ steps.windows_artifacts.outputs.windows_installer_version }}.zip`
-            - The installer executable is inside the ZIP to avoid direct `.exe` browser download blocking.
-            - Squirrel update packages are published separately to `windows-update-feed`.
-            - This release remains a draft until all validation and feed publication steps succeed.
+          body_path: out/windows-release-notes.md
           files: |
             out/Codex-win-x64-${{ steps.windows_artifacts.outputs.windows_portable_version }}.zip
             out/CodexSetup-win-x64-${{ steps.windows_artifacts.outputs.windows_installer_version }}.zip
@@ -306,8 +320,10 @@ jobs:
           RELEASE_TAG: codex-win-${{ steps.windows_artifacts.outputs.windows_installer_version }}
           PORTABLE: out/Codex-win-x64-${{ steps.windows_artifacts.outputs.windows_portable_version }}.zip
           INSTALLER: out/CodexSetup-win-x64-${{ steps.windows_artifacts.outputs.windows_installer_version }}.zip
+          RELEASE_NOTES: out/windows-release-notes.md
         run: |
           gh release upload $env:RELEASE_TAG $env:PORTABLE $env:INSTALLER --clobber
+          gh release edit $env:RELEASE_TAG --notes-file $env:RELEASE_NOTES
 
       - name: Upload Windows update feed to draft staging release
         uses: softprops/action-gh-release@v3
@@ -318,6 +334,7 @@ jobs:
           body: |
             Temporary staging assets for the Windows `windows-update-feed` release.
             This draft is deleted after the corresponding public Windows release is finalized.
+            <!-- codex-rebuild-run-id:${{ github.run_id }} -->
           files: out/update-feed/*
           fail_on_unmatched_files: true
           overwrite_files: true
@@ -370,12 +387,14 @@ jobs:
               --source-sha "$GITHUB_SHA"
           fi
 
-          release_json="$(gh release view "$RELEASE_TAG" --json isDraft,assets)"
-          feed_json="$(gh release view "$FEED_STAGING_TAG" --json isDraft,assets)"
+          release_json="$(gh release view "$RELEASE_TAG" --json isDraft,assets,body)"
+          feed_json="$(gh release view "$FEED_STAGING_TAG" --json isDraft,assets,body)"
           if [[ "$REPLACE_EXISTING_RELEASE" != "true" ]]; then
             test "$(jq -r '.isDraft' <<<"$release_json")" = true
           fi
           test "$(jq -r '.isDraft' <<<"$feed_json")" = true
+          grep -Fq "<!-- codex-rebuild-run-id:${GITHUB_RUN_ID} -->" <<<"$(jq -r '.body' <<<"$release_json")"
+          grep -Fq "<!-- codex-rebuild-run-id:${GITHUB_RUN_ID} -->" <<<"$(jq -r '.body' <<<"$feed_json")"
           printf '%s\n' "$release_json" | jq -r '.assets[].name' | sort
           printf '%s\n' "$feed_json" | jq -r '.assets[].name' | sort
 
@@ -556,3 +575,21 @@ jobs:
           staging_id="$(gh release view "$FEED_STAGING_TAG" --json databaseId --jq '.databaseId')"
           test -n "$staging_id"
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$staging_id"
+
+  cleanup-failed-drafts:
+    name: Clean drafts from a failed Windows run
+    needs: [build-windows, release]
+    if: ${{ always() && (needs.build-windows.result == 'failure' || needs.build-windows.result == 'cancelled' || needs.release.result == 'failure' || needs.release.result == 'cancelled') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Remove drafts created by this failed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/cleanup-windows-drafts.js --run-id "${{ github.run_id }}" --delete
