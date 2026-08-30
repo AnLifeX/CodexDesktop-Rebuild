@@ -27,6 +27,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  cleanup-stale-drafts:
+    name: Clean expired Windows drafts
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Remove expired failed and unpublished drafts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/cleanup-windows-drafts.js --scheduled --delete
+
   check:
     runs-on: ubuntu-latest
     outputs:
@@ -211,16 +228,34 @@ jobs:
       - name: Write Windows release metadata
         run: node scripts/windows-release-metadata.js --write out/windows-release-metadata.json --upstream-version "${{ steps.windows_version.outputs.windows_upstream_version }}" --internal-version "${{ steps.windows_version.outputs.windows_internal_app_version }}" --release-version "${{ steps.windows_version.outputs.windows_release_version }}" --source-sha "${{ github.sha }}"
 
+      - name: Generate Windows release notes
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.windows_version.outputs.windows_internal_app_version }}
+          MSIX_VERSION: ${{ steps.windows_version.outputs.windows_upstream_version }}
+          CLI_VERSION: ${{ steps.codex_cli.outputs.codex_cli_version }}
+          RELEASE_VERSION: ${{ steps.windows_version.outputs.windows_release_version }}
+          PORTABLE_VERSION: ${{ steps.windows_artifacts.outputs.windows_portable_version }}
+          INSTALLER_VERSION: ${{ steps.windows_artifacts.outputs.windows_installer_version }}
+        run: |
+          node scripts/generate-windows-release-notes.js `
+            --write out/windows-release-notes.md `
+            --previous scripts/upstream-versions.json `
+            --app-version $env:APP_VERSION `
+            --msix-version $env:MSIX_VERSION `
+            --cli-version $env:CLI_VERSION `
+            --release-version $env:RELEASE_VERSION `
+            --portable-name "Codex-win-x64-$env:PORTABLE_VERSION.zip" `
+            --installer-name "CodexSetup-win-x64-$env:INSTALLER_VERSION.zip" `
+            --source-run-id "${{ github.run_id }}"
+
       - name: Upload Windows assets to draft release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: codex-win-${{ steps.windows_artifacts.outputs.windows_installer_version }}
           name: Codex Win ${{ steps.windows_artifacts.outputs.windows_installer_version }}
           target_commitish: master
-          body: |
-            Windows-only rebuild from the official Codex package.
-            - Bundled Codex CLI: ${{ steps.codex_cli.outputs.codex_cli_version }}.
-            Squirrel update packages are staged separately and this release remains a draft until validation succeeds.
+          body_path: out/windows-release-notes.md
           files: |
             out/Codex-win-x64-${{ steps.windows_artifacts.outputs.windows_portable_version }}.zip
             out/CodexSetup-win-x64-${{ steps.windows_artifacts.outputs.windows_installer_version }}.zip
@@ -240,6 +275,7 @@ jobs:
           body: |
             Temporary staging assets for the Windows update feed.
             This draft is deleted after the stable feed is updated.
+            <!-- codex-rebuild-run-id:${{ github.run_id }} -->
           files: out/update-feed/*
           fail_on_unmatched_files: true
           overwrite_files: true
@@ -285,10 +321,12 @@ jobs:
             --pattern 'RELEASES' \
             --pattern 'delta-chain.json' \
             --clobber
-          release_json="$(gh release view "$RELEASE_TAG" --json isDraft,assets)"
-          feed_json="$(gh release view "$FEED_STAGING_TAG" --json isDraft,assets)"
+          release_json="$(gh release view "$RELEASE_TAG" --json isDraft,assets,body)"
+          feed_json="$(gh release view "$FEED_STAGING_TAG" --json isDraft,assets,body)"
           test "$(jq -r '.isDraft' <<<"$release_json")" = true
           test "$(jq -r '.isDraft' <<<"$feed_json")" = true
+          grep -Fq "<!-- codex-rebuild-run-id:${GITHUB_RUN_ID} -->" <<<"$(jq -r '.body' <<<"$release_json")"
+          grep -Fq "<!-- codex-rebuild-run-id:${GITHUB_RUN_ID} -->" <<<"$(jq -r '.body' <<<"$feed_json")"
 
       - name: Validate release metadata and monotonic state
         env:
@@ -435,3 +473,21 @@ jobs:
           staging_id="$(gh release view "$FEED_STAGING_TAG" --json databaseId --jq '.databaseId')"
           test -n "$staging_id"
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$staging_id"
+
+  cleanup-failed-drafts:
+    name: Clean drafts from a failed Windows run
+    needs: [check, build-windows, release]
+    if: ${{ always() && (needs.build-windows.result == 'failure' || needs.build-windows.result == 'cancelled' || needs.release.result == 'failure' || needs.release.result == 'cancelled') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Remove drafts created by this failed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/cleanup-windows-drafts.js --run-id "${{ github.run_id }}" --delete

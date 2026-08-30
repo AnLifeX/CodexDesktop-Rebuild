@@ -78,8 +78,35 @@ test("Windows builds match and record the Codex CLI bundled by the official MSIX
       /npm install --package-lock-only --ignore-scripts --no-audit --no-fund \\\n\s+--save-optional --save-exact "@openai\/codex@\$WINDOWS_CODEX_CLI_VERSION"/,
     );
     assert.match(text, /git add package\.json package-lock\.json scripts\/upstream-versions\.json/);
-    assert.match(text, /Bundled Codex CLI:/);
+    assert.match(text, /generate-windows-release-notes\.js/);
+    assert.match(text, /--cli-version \$env:CLI_VERSION/);
   }
+});
+
+test("Windows releases use generated final-form notes with source run markers", () => {
+  for (const { name, text } of workflows) {
+    assert.match(text, /body_path: out\/windows-release-notes\.md/);
+    assert.match(text, /--source-run-id "\$\{\{ github\.run_id \}\}"/);
+    assert.match(text, /<!-- codex-rebuild-run-id:\$\{\{ github\.run_id \}\} -->/);
+    assert.match(text, /codex-rebuild-run-id:\$\{GITHUB_RUN_ID\}/);
+    assert.doesNotMatch(text, /remains a draft|仍是草稿/i, `${name} must not publish draft-only wording`);
+  }
+});
+
+test("failed and expired Windows drafts are cleaned without touching active drafts", () => {
+  for (const { name, text } of workflows) {
+    assert.match(text, /^  cleanup-failed-drafts:\s*$/m, `${name} must clean failed runs`);
+    assert.match(text, /always\(\).*needs\.build-windows\.result == 'failure'/);
+    assert.match(
+      text,
+      /cleanup-windows-drafts\.js --run-id "\$\{\{ github\.run_id \}\}" --delete/,
+    );
+  }
+
+  const scheduled = workflows.find(({ name }) => name === "sync.yml").text;
+  assert.match(scheduled, /^  cleanup-stale-drafts:\s*$/m);
+  assert.match(scheduled, /if: github\.event_name == 'schedule'/);
+  assert.match(scheduled, /cleanup-windows-drafts\.js --scheduled --delete/);
 });
 
 test("the manual workflow publishes Windows by default", () => {
