@@ -18,7 +18,7 @@ const { locateBundles, relPath } = require("./patch-util");
 // ──────────────────────────────────────────────
 
 const OLD_COPYRIGHT = "\u00A9 OpenAI"; // (c) OpenAI
-const NEW_COPYRIGHT = "\u00A9 OpenAI \u00B7 Cometix Space"; // (c) OpenAI . Cometix Space
+const NEW_COPYRIGHT = "\u00A9 OpenAI \u00B7 Rebuilt by AnLifeX";
 const OLD_COPYRIGHT_HTML = `<div class="copyright">${OLD_COPYRIGHT}</div>`;
 const NEW_COPYRIGHT_HTML = `<div class="copyright">${NEW_COPYRIGHT}</div>`;
 

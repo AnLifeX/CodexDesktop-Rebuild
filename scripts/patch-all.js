@@ -19,7 +19,6 @@ const PATCHES = [
   "patch-zh-cn-catalog.js",
   "patch-native-menu-i18n.js",
   "patch-copyright.js",
-  "patch-devtools.js",
   "patch-fast-mode.js",
   "patch-plugin-auth.js",
   "patch-windows-native-paths.js",

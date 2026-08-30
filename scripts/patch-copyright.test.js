@@ -20,7 +20,7 @@ test("keeps the legacy copyright property target", () => {
   const source = "app.setAboutPanelOptions({copyright:`© OpenAI`})";
   const result = patchCopyrightSource(source);
   assert.equal(result.status, "patched");
-  assert.match(result.code, /copyright:`© OpenAI · Cometix Space`/);
+  assert.match(result.code, /copyright:`© OpenAI · Rebuilt by AnLifeX`/);
 });
 
 test("fails closed for missing or ambiguous copyright targets", () => {

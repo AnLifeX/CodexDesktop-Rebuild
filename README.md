@@ -6,6 +6,15 @@
 - 下载：[GitHub Releases](https://github.com/AnLifeX/CodexDesktop-Rebuild/releases/latest)
 - Windows 更新源：[windows-update-feed](https://github.com/AnLifeX/CodexDesktop-Rebuild/releases/tag/windows-update-feed)
 
+## 核心优化
+
+- **独立 Windows 自动更新**：使用本仓库自己的更新源，支持断点续传、下载校验和代理加速。
+- **智能残差更新**：在查询阶段规划完整残差链，仅当链路完整且总大小小于完整包时使用，否则直接选择完整包。
+- **中文本地化**：启用中文界面，补充缺失翻译，并汉化原生菜单与硬编码标题。
+- **Windows 10 兼容**：修复 Computer Use 截图接口兼容问题，并提供截图回退方案。
+- **客户端功能增强**：改善 Fast 模式、插件、内置浏览器及 Computer Use 的本地可用性判断。
+- **会话管理增强**：支持在侧边栏和归档列表中永久删除会话，并修复旧本地会话被隐藏的问题。
+
 > [!IMPORTANT]
 > 本项目不是 OpenAI 官方发行版，也不隶属于 OpenAI。构建过程会下载官方应用资源和官方 Codex CLI，再对桌面端代码进行补丁和重新打包。项目不会赋予账号额外的云端权限、模型权限或额度。
 
@@ -26,7 +35,7 @@
 - 强制启用应用内置的国际化功能，避免远端功能开关关闭中文界面。
 - 补充官方 `zh-CN` 语言包中缺失的中文文案，并修正已经确认的错误翻译。
 - 汉化 Electron 原生菜单、右键菜单、命令菜单和部分硬编码标题。
-- 关于页面保留 OpenAI 标识，并加入 Cometix Space 的重构致谢。
+- 关于页面显示 `© OpenAI · Rebuilt by AnLifeX`。
 
 ### Fast 模式与插件可用性
 
@@ -47,7 +56,6 @@
 - 修正 Squirrel.Windows 解包时原生模块路径过深的问题。
 - 兼容 Windows 10 上 Computer Use 截图接口缺少可选 COM 接口时的情况。
 - 为 Windows.Graphics.Capture 无法返回首帧等情况增加 GDI/PrintWindow 截图回退。
-- 启用 DevTools 和“检查元素”，便于排查客户端问题。
 
 ### 独立 Windows 更新器
 
@@ -68,7 +76,7 @@ Windows 更新源始终保留最新完整包，并最多保留 5 个连续版本
 2. 链上的每个残差包及版本关系都有效。
 3. 所需残差包的总大小小于最新版完整包。
 
-只要缺少任意中间版本、当前版本早于保留窗口、清单无效，或残差包总和不再划算，客户端就会在开始下载前直接选择完整包。因此不会先下载一部分残差包，发现无法衔接后再浪费流量改下完整包。
+只要缺少任意中间版本、当前版本早于保留窗口、清单无效，或残差包总和不再划算，客户端就会在开始下载前直接选择完整包。
 
 可用的环境变量：
 
@@ -185,7 +193,6 @@ GitHub Actions 每天 `08:30 UTC`（北京时间 `16:30`）检查一次官方 Wi
 ## 致谢
 
 - [OpenAI Codex](https://github.com/openai/codex)：Codex CLI 及官方应用基础。
-- [Cometix Space](https://github.com/Haleclipse)：跨平台重构思路与相关工作。
 - [Electron Forge](https://www.electronforge.io/)：Electron 打包工具链。
 
 ## 许可与上游内容
