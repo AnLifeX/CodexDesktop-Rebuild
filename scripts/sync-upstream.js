@@ -41,8 +41,6 @@ https.globalAgent.options.ca = extraCAs;
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const SRC_DIR = path.join(PROJECT_ROOT, "src");
 const TEMP_DIR = path.join(require("os").tmpdir(), "codex-sync");
-const VERSION_FILE = path.join(__dirname, ".versions.json");
-
 const APPCAST_ARM64 = "https://persistent.oaistatic.com/codex-app-prod/appcast.xml";
 const APPCAST_X64 = "https://persistent.oaistatic.com/codex-app-prod/appcast-x64.xml";
 
@@ -369,15 +367,6 @@ function findResourcesDir(extractDir) {
   return appDir ? path.dirname(appDir) : null;
 }
 
-// ─── Version state ──────────────────────────────────────────────
-
-function loadVersions() {
-  try { return JSON.parse(fs.readFileSync(VERSION_FILE, "utf-8")); } catch { return {}; }
-}
-function saveVersions(v) {
-  fs.writeFileSync(VERSION_FILE, JSON.stringify(v, null, 2) + "\n");
-}
-
 // ─── Main ───────────────────────────────────────────────────────
 
 async function main() {
@@ -456,18 +445,6 @@ async function main() {
   if (failures.length > 0) {
     throw new Error(`Sync failed:\n   ${failures.join("\n   ")}`);
   }
-
-  const saved = loadVersions();
-  for (const [key, info] of Object.entries(results)) {
-    saved[key] = {
-      version: info.version,
-      internalAppVersion: info.internalAppVersion || undefined,
-      msixVersion: info.msixVersion || undefined,
-      build: info.build || "",
-      checkedAt: new Date().toISOString(),
-    };
-  }
-  saveVersions(saved);
 
   console.log("\n== Done ==");
   for (const [key, info] of Object.entries(results)) {

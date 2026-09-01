@@ -12,9 +12,6 @@ dist/
 src/
 src/.build-mode
 
-# Version check state (local only)
-scripts/.versions.json
-
 # Logs
 *.log
 npm-debug.log*
