@@ -12,6 +12,15 @@ const workflows = ["build.yml", "sync.yml"].map((name) => ({
   ).replace(/\r\n/g, "\n"),
 }));
 
+test("workflows do not create or restore dependency caches", () => {
+  const workflowDir = path.join(__dirname, "..", ".github", "workflows");
+  for (const name of fs.readdirSync(workflowDir).filter((entry) => /\.ya?ml$/i.test(entry))) {
+    const text = fs.readFileSync(path.join(workflowDir, name), "utf8");
+    assert.doesNotMatch(text, /^\s*cache:\s*npm\s*$/m, `${name} must not enable setup-node caching`);
+    assert.doesNotMatch(text, /uses:\s*actions\/cache@/i, `${name} must not use actions/cache`);
+  }
+});
+
 test("default and scheduled build workflows are Windows-only", () => {
   for (const { name, text } of workflows) {
     assert.match(

@@ -92,7 +92,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
       - run: npm ci
       - run: choco install 7zip -y
       - name: Add 7zz alias
@@ -355,7 +354,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
       - run: npm ci
 
       - name: Download draft release assets

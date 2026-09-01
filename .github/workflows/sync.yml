@@ -56,7 +56,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
       - name: Install dependencies
         run: npm ci
       - name: Check upstream Windows version
@@ -94,7 +93,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
       - name: Install dependencies
         run: npm ci
       - name: Install tools
@@ -298,7 +296,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
       - name: Install dependencies
         run: npm ci
 
