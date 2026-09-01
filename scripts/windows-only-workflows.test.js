@@ -34,8 +34,9 @@ test("default and scheduled build workflows are Windows-only", () => {
   const scheduled = workflows.find(({ name }) => name === "sync.yml").text;
   assert.match(
     scheduled,
-    /node scripts\/check-update\.js --windows-only --json --force/,
+    /node scripts\/check-update\.js --windows-only --json > upstream\.json/,
   );
+  assert.doesNotMatch(scheduled, /check-update\.js[^\n]*--force/);
 });
 
 test("Windows releases use official+rN codex-win tags and ZIP-only public assets", () => {

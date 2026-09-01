@@ -62,7 +62,7 @@ jobs:
         id: detect
         run: |
           set -euo pipefail
-          node scripts/check-update.js --windows-only --json --force > upstream.json
+          node scripts/check-update.js --windows-only --json > upstream.json
           args=(--upstream upstream.json --previous scripts/upstream-versions.json --github-output --json)
           if [ "${{ inputs.force }}" = "true" ]; then
             args+=(--force)
