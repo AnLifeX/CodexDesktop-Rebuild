@@ -528,7 +528,14 @@ function createArchiveReachability(ast) {
   function walkExecutableOwner(node, owner, parent = null) {
     if (!node || typeof node !== "object") return;
     if (node !== owner && isArchiveFunction(node)) {
-      if (parent?.type === "CallExpression" && parent.callee === node) enqueue(node);
+      const mappedCallback =
+        parent?.type === "CallExpression" &&
+        parent.arguments.includes(node) &&
+        ["map", "flatMap"].includes(archiveCalledMemberName(parent));
+      if (
+        parent?.type === "CallExpression" &&
+        (parent.callee === node || mappedCallback)
+      ) enqueue(node);
       return;
     }
     if (node.type === "CallExpression") {
@@ -735,6 +742,56 @@ function delegatedNativeArchiveManagerMethod(method, includesThreadId) {
   return finalExpression.callee.name;
 }
 
+function delegatedRuntimeArchiveManagerMethod(method, includesThreadId) {
+  const fn = method?.value;
+  if (
+    method?.type !== "MethodDefinition" ||
+    fn?.type !== "FunctionExpression" ||
+    fn.async !== true ||
+    fn.params.length !== (includesThreadId ? 1 : 0) ||
+    (includesThreadId && fn.params[0]?.type !== "Identifier")
+  ) return null;
+  const returns = [];
+  walkOwnArchiveFunction(fn.body, (node) => {
+    if (node.type === "ReturnStatement") returns.push(node);
+  });
+  if (returns.length !== 1) return null;
+  const returned = returns[0].argument;
+  const finalExpression = returned?.type === "SequenceExpression"
+    ? returned.expressions.at(-1)
+    : returned;
+  if (
+    finalExpression?.type !== "CallExpression" ||
+    finalExpression.callee?.type !== "Identifier" ||
+    finalExpression.arguments.length !== (includesThreadId ? 2 : 1)
+  ) return null;
+  const options = finalExpression.arguments[0];
+  if (
+    options?.type !== "ObjectExpression" ||
+    options.properties.length !== 3 ||
+    options.properties.some((property) => property.type !== "Property")
+  ) return null;
+  const hostId = archiveObjectProperty(options, "hostId")?.value;
+  const runtime = archiveObjectProperty(options, "runtime")?.value;
+  const handleThreadDeletion = archiveObjectProperty(options, "handleThreadDeletion")?.value;
+  if (
+    !isThisArchiveMember(hostId, "hostId") ||
+    !isThisArchiveMember(runtime, "runtime") ||
+    handleThreadDeletion?.type !== "CallExpression" ||
+    handleThreadDeletion.arguments.length !== 1 ||
+    handleThreadDeletion.arguments[0]?.type !== "ThisExpression" ||
+    handleThreadDeletion.callee?.type !== "MemberExpression" ||
+    handleThreadDeletion.callee.property?.name !== "bind" ||
+    !isThisArchiveMember(handleThreadDeletion.callee.object, "handleThreadDeletion")
+  ) return null;
+  if (
+    includesThreadId &&
+    (finalExpression.arguments[1]?.type !== "Identifier" ||
+      finalExpression.arguments[1].name !== fn.params[0].name)
+  ) return null;
+  return finalExpression.callee.name;
+}
+
 function nativeArchiveFetchCallIsValid(call, context, route, threadId) {
   if (
     call?.type !== "CallExpression" ||
@@ -833,6 +890,69 @@ function nativeArchiveManagerHelperIsValid(ast, helperName) {
   return deletedIds(finalExpression);
 }
 
+function nativeArchiveRuntimeManagerHelperIsValid(ast, helperName) {
+  const helpers = [];
+  walkArchive(ast, (node) => {
+    if (node.type === "FunctionDeclaration" && node.id?.name === helperName) helpers.push(node);
+  });
+  if (helpers.length !== 1) return false;
+  const helper = helpers[0];
+  if (
+    helper.async !== true ||
+    helper.params.length !== 2 ||
+    helper.params.some((param) => param.type !== "Identifier")
+  ) return false;
+  const context = helper.params[0].name;
+  const threadId = helper.params[1].name;
+  const fetched = [];
+  const deletions = [];
+  const returns = [];
+  walkOwnArchiveFunction(helper.body, (node) => {
+    if (
+      node.type === "VariableDeclarator" &&
+      node.id?.type === "Identifier" &&
+      node.init?.type === "AwaitExpression"
+    ) fetched.push(node);
+    if (
+      node.type === "CallExpression" &&
+      node.callee?.type === "MemberExpression" &&
+      node.callee.object?.type === "Identifier" &&
+      node.callee.object.name === context &&
+      node.callee.property?.name === "handleThreadDeletion"
+    ) deletions.push(node);
+    if (node.type === "ReturnStatement") returns.push(node);
+  });
+  if (fetched.length !== 1 || deletions.length !== 1 || returns.length !== 1) return false;
+  const deletedBinding = fetched[0].id.name;
+  const request = fetched[0].init.argument;
+  if (
+    request?.type !== "CallExpression" ||
+    request.callee?.type !== "MemberExpression" ||
+    request.callee.property?.name !== "deleteArchivedThreads" ||
+    request.callee.object?.type !== "MemberExpression" ||
+    request.callee.object.object?.type !== "Identifier" ||
+    request.callee.object.object.name !== context ||
+    request.callee.object.property?.name !== "runtime" ||
+    request.arguments.length !== 2 ||
+    request.arguments[0]?.type !== "MemberExpression" ||
+    request.arguments[0].object?.type !== "Identifier" ||
+    request.arguments[0].object.name !== context ||
+    request.arguments[0].property?.name !== "hostId" ||
+    request.arguments[1]?.type !== "Identifier" ||
+    request.arguments[1].name !== threadId
+  ) return false;
+  if (
+    deletions[0].arguments.length !== 1 ||
+    deletions[0].arguments[0]?.type !== "Identifier" ||
+    deletions[0].arguments[0].name !== deletedBinding
+  ) return false;
+  const returned = returns[0].argument;
+  const finalExpression = returned?.type === "SequenceExpression"
+    ? returned.expressions.at(-1)
+    : returned;
+  return finalExpression?.type === "Identifier" && finalExpression.name === deletedBinding;
+}
+
 function nativeArchiveManagerEvidence(ast) {
   const candidates = [];
   const relevantMethods = [];
@@ -855,7 +975,13 @@ function nativeArchiveManagerEvidence(ast) {
       singleHelper != null &&
       singleHelper === allHelper &&
       nativeArchiveManagerHelperIsValid(ast, singleHelper);
-    if (inline || delegated) candidates.push(node);
+    const runtimeSingleHelper = delegatedRuntimeArchiveManagerMethod(single[0], true);
+    const runtimeAllHelper = delegatedRuntimeArchiveManagerMethod(all[0], false);
+    const runtimeDelegated =
+      runtimeSingleHelper != null &&
+      runtimeSingleHelper === runtimeAllHelper &&
+      nativeArchiveRuntimeManagerHelperIsValid(ast, runtimeSingleHelper);
+    if (inline || delegated || runtimeDelegated) candidates.push(node);
   });
   if (relevantMethods.length > 0 && candidates.length !== 1) {
     throw new Error("native archive manager API evidence is detached or structurally malformed");
@@ -1276,6 +1402,7 @@ function inspectArchiveDataControlsSource(source) {
   const tokenCounts = new Map([
     ["delete-archived-conversation", 0],
     ["settings.dataControls.archivedChats.delete", 0],
+    ["settings.dataControls.archivedChats.deleteAriaLabel", 0],
     ["thread/delete", 0],
     ["delete-conversation", 0],
   ]);
@@ -1349,7 +1476,10 @@ function inspectArchiveDataControlsSource(source) {
     labelProperties.length === 0 &&
     tokenCounts.get("settings.dataControls.archivedChats.delete") === 0 &&
     importedLabelMembers.length === 1;
-  const deleteLabelEvidence = localLabelEvidence || importedLabelEvidence;
+  const inlineAriaLabelEvidence =
+    tokenCounts.get("settings.dataControls.archivedChats.deleteAriaLabel") === 1;
+  const deleteLabelEvidence =
+    localLabelEvidence || importedLabelEvidence || inlineAriaLabelEvidence;
   const nativeEvidence =
     deleteLabelEvidence &&
     nativeFunctions.length === 1 &&
@@ -1367,6 +1497,7 @@ function inspectArchiveDataControlsSource(source) {
   const anyNativeToken =
     tokenCounts.get("delete-archived-conversation") > 0 ||
     tokenCounts.get("settings.dataControls.archivedChats.delete") > 0 ||
+    tokenCounts.get("settings.dataControls.archivedChats.deleteAriaLabel") > 0 ||
     importedLabelMembers.length > 0 ||
     tokenCounts.get("thread/delete") > 0 ||
     managerCallCounts.deleteArchivedConversation > 0 ||
@@ -1377,7 +1508,16 @@ function inspectArchiveDataControlsSource(source) {
   }
   if (nativeEvidence || currentNativeEvidence) return { mode: "native", status: "native" };
   if (legacyEvidence) return { mode: "legacy", status: "already" };
-  if (anyNativeToken) throw new Error("native archive-delete UI evidence is detached or structurally malformed");
+  if (anyNativeToken) {
+    throw new Error(
+      "native archive-delete UI evidence is detached or structurally malformed " +
+        `(labels=${deleteLabelEvidence ? 1 : 0}, functions=${nativeFunctions.length}, ` +
+        `routes=${tokenCounts.get("delete-archived-conversation")}, ` +
+        `threadDelete=${tokenCounts.get("thread/delete")}, ` +
+        `manager=${managerCallCounts.deleteArchivedConversation}/` +
+        `${managerCallCounts.deleteAllArchivedConversations})`,
+    );
+  }
   if (anyLegacyToken) throw new Error("legacy archive-delete UI evidence is detached or structurally malformed");
   return null;
 }
@@ -1463,7 +1603,9 @@ function mayContainArchiveRouteContract(source) {
     source.includes("delete-archived-conversation") ||
     source.includes("delete-archived-thread") ||
     source.includes("delete-all-archived-threads") ||
-    source.includes("delete-conversation")
+    source.includes("delete-conversation") ||
+    (source.includes("deleteArchivedConversation") &&
+      source.includes("deleteAllArchivedConversations"))
   );
 }
 
@@ -1804,7 +1946,12 @@ function main() {
       }
       return {
         platform: platformName,
-        ...findWindowsArchiveTargets(directory),
+        candidates: fs.readdirSync(directory)
+          .filter((fileName) => fileName.endsWith(".js"))
+          .map((fileName) => {
+            const filePath = path.join(directory, fileName);
+            return { fileName, filePath, source: fs.readFileSync(filePath, "utf-8") };
+          }),
       };
     }
     const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");

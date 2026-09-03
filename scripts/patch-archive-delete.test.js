@@ -81,6 +81,24 @@ const LATEST_SHARED_NATIVE_DATA_CONTROLS = [
   "return jsx(Button,{children:X.delete})}",
   "export{Settings as DataControlsSettings}",
 ].join("");
+const CURRENT_RUNTIME_NATIVE_APP_MAIN = [
+  "async function runtimeDelete(context,threadId){",
+  "let deleted=await context.runtime.deleteArchivedThreads(context.hostId,threadId);",
+  "return context.handleThreadDeletion(deleted),deleted}",
+  "class Manager{",
+  "async deleteArchivedConversation(threadId){return runtimeDelete({hostId:this.hostId,runtime:this.runtime,handleThreadDeletion:this.handleThreadDeletion.bind(this)},threadId)}",
+  "async deleteAllArchivedConversations(){return runtimeDelete({hostId:this.hostId,runtime:this.runtime,handleThreadDeletion:this.handleThreadDeletion.bind(this)})}",
+  "}",
+].join("");
+const CURRENT_ARIA_NATIVE_DATA_CONTROLS = [
+  "function Settings(){",
+  "let mutation=async e=>e.kind===`all`?manager.deleteAllArchivedConversations():e.kind===`project`?(await Promise.all(e.threadIds.map(t=>manager.deleteArchivedConversation(t)))).flat():manager.deleteArchivedConversation(e.thread.id);",
+  "let onError=e=>classify(e,`thread/delete`);",
+  "let options={mutationFn:mutation,onError};useMutation(options);",
+  "let aria=intl.formatMessage({id:`settings.dataControls.archivedChats.deleteAriaLabel`});",
+  "return jsx(Button,{ariaLabel:aria})}",
+  "export{Settings as DataControlsSettings}",
+].join("");
 
 test("keeps native archive deletion and injects an independent active delete route", () => {
   assert.equal(
@@ -190,6 +208,41 @@ test("accepts a native archive UI whose delete message comes from a shared catal
   assert.throws(
     () => patchDataControlsSource(
       LATEST_SHARED_NATIVE_DATA_CONTROLS.replace("X.delete", "[X.delete,X.delete]"),
+    ),
+    /native archive-delete UI evidence is detached or structurally malformed/i,
+  );
+});
+
+test("accepts the current desktop-runtime archive API and inline aria label", () => {
+  const result = planArchivePlatform({
+    platform: "win",
+    candidates: [
+      {
+        fileName: "app-initial-current.js",
+        filePath: "webview/assets/app-initial-current.js",
+        source: CURRENT_RUNTIME_NATIVE_APP_MAIN,
+      },
+      {
+        fileName: "data-controls-current.js",
+        filePath: "webview/assets/data-controls-current.js",
+        source: CURRENT_ARIA_NATIVE_DATA_CONTROLS,
+      },
+    ],
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(result.writes[0].result.status, "native");
+  assert.equal(result.writes[0].result.appMain.mode, "native-api");
+  assert.equal(result.writes[0].result.dataControls.mode, "native");
+
+  assert.throws(
+    () => patchAppMainSource(
+      CURRENT_RUNTIME_NATIVE_APP_MAIN.replace("deleteArchivedThreads", "readArchivedThreads"),
+    ),
+    /native archive manager API evidence is detached or structurally malformed/i,
+  );
+  assert.throws(
+    () => patchDataControlsSource(
+      CURRENT_ARIA_NATIVE_DATA_CONTROLS.replace("deleteAriaLabel", "removeAriaLabel"),
     ),
     /native archive-delete UI evidence is detached or structurally malformed/i,
   );

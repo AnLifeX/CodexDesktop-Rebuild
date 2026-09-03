@@ -2528,7 +2528,12 @@ function main() {
       }
       return {
         platform: platformName,
-        ...findWindowsSidebarTargets(directory),
+        candidates: fs.readdirSync(directory)
+          .filter((fileName) => fileName.endsWith(".js"))
+          .map((fileName) => {
+            const filePath = path.join(directory, fileName);
+            return { fileName, filePath, source: fs.readFileSync(filePath, "utf-8") };
+          }),
       };
     }
     const directory = path.join(SRC_DIR, platformName, "_asar", "webview", "assets");
