@@ -435,6 +435,30 @@ test("macOS matrix locates associated consolidated sidebar roles", () => {
   }
 });
 
+test("Windows structural planning disambiguates split and consolidated bundles", () => {
+  const result = planSidebarPlatform({
+    platform: "win",
+    candidates: [
+      {
+        fileName: "app-initial-current.js",
+        filePath: "webview/assets/app-initial-current.js",
+        source: LATEST_THREAD_ACTIONS,
+      },
+      {
+        fileName: "app-primary-current.js",
+        filePath: "webview/assets/app-primary-current.js",
+        source:
+          "const splitTokens=[`sidebarElectron.archiveThread`,`copyConversationMarkdown`,`archiveConversation(`];" +
+          LATEST_SIDEBAR,
+      },
+    ],
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(result.writes[0].threadActions.fileName, "app-initial-current.js");
+  assert.equal(result.writes[0].sidebar.fileName, "app-primary-current.js");
+  assert.equal(result.writes[0].result.status, "patched");
+});
+
 test("macOS sidebar structural roles accept already-patched contracts", () => {
   const candidates = validMacSidebarCandidates("already").map((candidate) => {
     if (candidate.fileName.startsWith("thread-app-shell")) {
