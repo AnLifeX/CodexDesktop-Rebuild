@@ -231,6 +231,8 @@ jobs:
 
       - name: Prepare Windows update feed artifact
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $previousManifest = Join-Path $env:RUNNER_TEMP "previous-delta-chain.json"
           $status = curl.exe --silent --show-error --location `
@@ -243,6 +245,14 @@ jobs:
             "--dest", "out/update-feed"
           )
           if ($status -eq "200") {
+            $previousFeed = "out/make/squirrel.windows/x64/previous-feed"
+            New-Item -ItemType Directory -Force -Path $previousFeed | Out-Null
+            gh release download "${{ env.WINDOWS_UPDATE_TAG }}" `
+              --repo $env:GITHUB_REPOSITORY `
+              --dir $previousFeed `
+              --pattern '*-delta.nupkg' `
+              --pattern 'RELEASES'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $args += @("--previous-manifest", $previousManifest)
           } elseif ($status -ne "404") {
             throw "Unable to read previous delta chain manifest: HTTP $status"
