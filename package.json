@@ -1,7 +1,7 @@
 {
   "name": "codex-rebuild",
   "productName": "Codex",
-  "version": "26.825.51511",
+  "version": "26.901.20858",
   "description": "Codex Electron App - Cross-platform Build",
   "homepage": "https://github.com/anlifex/CodexDesktop-Rebuild",
   "repository": {
@@ -84,11 +84,11 @@
     "https://ghproxy.net/"
   ],
   "optionalDependencies": {
-    "@openai/codex": "0.151.0-alpha.7.2"
+    "@openai/codex": "0.153.0-alpha.5"
   },
-  "codexRebuildOfficialVersion": "26.825.51511",
+  "codexRebuildOfficialVersion": "26.901.20858",
   "codexRebuildRevision": 0,
-  "codexRebuildReleaseVersion": "26.825.51511",
-  "codexRebuildPackageVersion": "26.825.51511",
-  "codexRebuildWindowsMsixVersion": "26.825.6671.0"
+  "codexRebuildReleaseVersion": "26.901.20858",
+  "codexRebuildPackageVersion": "26.901.20858",
+  "codexRebuildWindowsMsixVersion": "26.901.1978.0"
 }
