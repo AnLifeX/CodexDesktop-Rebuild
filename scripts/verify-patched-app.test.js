@@ -1118,21 +1118,35 @@ test("sidebar-delete rejects inert IDs without structural thread action and row 
   );
 });
 
-test("sidebar-delete verification accepts current manager-backed thread actions", (t) => {
+test("production verification discovers current app-initial and app-primary sidebar bundles", (t) => {
   const fixture = createFixture(t);
   const managerBacked = [
     "let CurrentMessages=g({archiveThread:{id:`sidebarElectron.archiveThread`,defaultMessage:`Archive chat`,description:`Menu item to archive a local chat`}})",
     "function CurrentActions(){let scope=getScope(),intl=getIntl(),archiveAction,copyAction,result;archiveAction=input=>{let{conversationId:threadId,hostId:hostId,source,onArchiveStart,onArchiveSuccess,onArchiveError}=input;onArchiveStart?.(),ManagerFactory(scope,hostId??scope.get(DefaultHost,threadId)).archiveConversation(threadId,{source}).then(()=>onArchiveSuccess?.()).catch(()=>{onArchiveError?.(),scope.get(Toast).danger(intl.formatMessage(CurrentMessages.archiveThreadError))})};copyAction=input=>{};return result={archiveThread:archiveAction,copyConversationMarkdown:copyAction},result}",
   ].join(";");
-  writeText(
-    path.join(fixture.asarRoot, "webview", "assets", "thread-actions-fixture.js"),
-    patchThreadActionsSource(managerBacked).code,
+  const nativeAppMain = fs.readFileSync(
+    path.join(fixture.asarRoot, "webview", "assets", "app-main-fixture.js"),
+    "utf8",
   );
+  writeText(
+    path.join(fixture.asarRoot, "webview", "assets", "app-initial-current.js"),
+    `${nativeAppMain};${patchThreadActionsSource(managerBacked).code}`,
+  );
+  writeText(
+    path.join(fixture.asarRoot, "webview", "assets", "app-primary-current.js"),
+    patchSidebarSource(STRUCTURAL_SIDEBAR).code,
+  );
+  for (let index = 0; index < 501; index += 1) {
+    writeText(
+      path.join(fixture.asarRoot, "webview", "assets", `noise-${index}.js`),
+      "",
+    );
+  }
 
   const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
   assert.ok(
     result.contracts["sidebar-delete"].includes(
-      "src/win/_asar/webview/assets/thread-actions-fixture.js",
+      "src/win/_asar/webview/assets/app-primary-current.js",
     ),
   );
 });

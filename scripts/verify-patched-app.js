@@ -985,7 +985,7 @@ function isVerificationSource(asarRoot, filePath) {
   if (/^\.vite\/build\/(?:early-bootstrap|preload|bootstrap(?:-[A-Za-z0-9_$-]+)?|main-.*)\.js$/.test(relative)) {
     return true;
   }
-  return /^webview\/assets\/(?:app-initial|app-shell|data-controls|use-service-tier-settings|read-service-tier-for-request|use-is-plugins-enabled)-.*\.js$/.test(
+  return /^webview\/assets\/(?:app-initial|app-primary|app-shell|data-controls|use-service-tier-settings|read-service-tier-for-request|use-is-plugins-enabled)-.*\.js$/.test(
     relative,
   );
 }
