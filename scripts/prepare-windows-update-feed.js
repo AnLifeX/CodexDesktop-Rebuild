@@ -168,7 +168,10 @@ function prepareWindowsUpdateFeed({
 }) {
   if (!fs.existsSync(source)) throw new Error(`Source directory does not exist: ${source}`);
 
-  const files = walkFiles(source);
+  const files = walkFiles(source).sort((left, right) => {
+    const depth = (file) => path.relative(source, file).split(path.sep).length;
+    return depth(right) - depth(left);
+  });
   const packageFiles = new Map(
     files.filter((file) => file.endsWith(".nupkg")).map((file) => [path.basename(file), file]),
   );

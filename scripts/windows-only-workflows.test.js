@@ -238,6 +238,11 @@ test("Windows update feeds carry forward and publish bounded delta-chain metadat
     );
     assert.match(
       text,
+      /gh release download "\$\{\{ env\.WINDOWS_UPDATE_TAG \}\}" `[\s\S]*?--pattern '\*-delta\.nupkg' `[\s\S]*?--pattern 'RELEASES'/,
+      `${name} must download the packages and RELEASES referenced by the previous chain`,
+    );
+    assert.match(
+      text,
       /--pattern 'delta-chain\.json'/,
       `${name} must preserve the manifest through the staging draft`,
     );

@@ -98,6 +98,31 @@ test("keeps a contiguous delta suffix and the latest full package", (t) => {
   );
 });
 
+test("same-version rebuild prefers newly generated packages over downloaded history", (t) => {
+  const fixture = createFixture(t);
+  const previousFull = addPackage(fixture, "1.0.0", "full", 100);
+  const currentDelta = addPackage(fixture, "2.0.0", "delta", 10);
+  const currentFull = addPackage(fixture, "2.0.0", "full", 100);
+  writeSourceReleases(fixture, [previousFull, currentDelta, currentFull]);
+
+  const previousFeed = path.join(fixture.source, "previous-feed");
+  fs.mkdirSync(previousFeed);
+  const staleBody = Buffer.from("stale delta");
+  fs.writeFileSync(path.join(previousFeed, currentDelta.filename), staleBody);
+  fs.writeFileSync(
+    path.join(previousFeed, "RELEASES"),
+    `${crypto.createHash("sha1").update(staleBody).digest("hex")} ${currentDelta.filename} ${staleBody.length}\n`,
+  );
+
+  const result = prepareWindowsUpdateFeed({ source: fixture.source, dest: fixture.dest });
+
+  assert.equal(result.manifest.deltas[0].sha1, currentDelta.sha1);
+  assert.equal(
+    fs.readFileSync(path.join(fixture.dest, currentDelta.filename)).length,
+    currentDelta.size,
+  );
+});
+
 test("caps the retained delta chain at five packages", (t) => {
   const fixture = createFixture(t);
   const entries = [];
