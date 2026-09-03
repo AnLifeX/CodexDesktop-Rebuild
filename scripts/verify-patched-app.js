@@ -883,13 +883,7 @@ function inspectSharedArchiveContract(sources) {
 
 function inspectSidebarContract(sources) {
   try {
-    const candidates = patchCandidates(sources, ["webview/assets"]).filter(
-      ({ source }) =>
-        (source.includes("sidebarElectron.archiveThread") &&
-          source.includes("archive-conversation")) ||
-        (source.includes("thread-primary-action") &&
-          source.includes("archive-thread")),
-    );
+    const candidates = patchCandidates(sources, ["webview/assets"]);
     const plan = planSidebarPlatform({
       platform: "win",
       candidates,
