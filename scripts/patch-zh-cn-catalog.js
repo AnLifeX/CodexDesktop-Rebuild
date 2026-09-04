@@ -52,6 +52,9 @@ const ZH_CN_TRANSLATION_SPECS = [
     "Codex 将能够在未经你许可的情况下，在此计算机上的任何位置运行命令、使用互联网，以及创建和编辑文件。包括但不限于：",
   ],
   ["composer.queuedMessage.openInSideChat", "在侧边聊天中打开"],
+  ["composer.modelPicker.default.description", "推荐模型组合"],
+  ["composer.modelPicker.default.label", "默认"],
+  ["composer.modelPicker.modelList.open.ariaLabel", "选择模型"],
   ["inbox.automations.createWithCodex", "使用 Codex 创建"],
   [
     "localConversation.forkFromOlderTurnDialog.local.label",
@@ -337,6 +340,13 @@ const ZH_CN_TRANSLATION_SPECS = [
   ],
   ["settings.general.inAppUpdates.label", "应用内更新"],
   ["settings.general.inAppUpdates.status.managed", "由组织管理"],
+  ["settings.import.autosync.afterImport", "首次导入后可用"],
+  ["settings.import.autosync.content", "要同步的内容"],
+  ["settings.import.autosync.customize", "自定义"],
+  [
+    "settings.import.autosync.paused",
+    "同步已暂停。你的内容选择已保存",
+  ],
   ["settings.import.history.entryTitle.fromProvider", "从 {provider} 导入"],
   ["settings.usage.limits.requestSaved", "请求已提交"],
   ["settings.usage.limits.requestUpdated", "请求已更新"],
@@ -384,6 +394,7 @@ const ZH_CN_TRANSLATION_SPECS = [
     "sidebarOnboardingChecklist.exploreCodex.prompt",
     "帮助我了解 Codex 的功能，并推荐三个实用的入门方式",
   ],
+  ["serviceTier.ultrafast.description", "为时延敏感型任务提供最快响应"],
 ];
 
 const ZH_CN_TRANSLATIONS = new Map(ZH_CN_TRANSLATION_SPECS);

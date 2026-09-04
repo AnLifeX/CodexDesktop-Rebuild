@@ -191,6 +191,23 @@ test("translation specs cover the confirmed visible UI gaps", () => {
   }
 });
 
+test("translation specs cover the model picker and import screenshot gaps", () => {
+  const expected = new Map([
+    ["composer.modelPicker.modelList.open.ariaLabel", "选择模型"],
+    ["composer.modelPicker.default.label", "默认"],
+    ["composer.modelPicker.default.description", "推荐模型组合"],
+    ["serviceTier.ultrafast.description", "为时延敏感型任务提供最快响应"],
+    ["settings.import.autosync.paused", "同步已暂停。你的内容选择已保存"],
+    ["settings.import.autosync.content", "要同步的内容"],
+    ["settings.import.autosync.afterImport", "首次导入后可用"],
+    ["settings.import.autosync.customize", "自定义"],
+  ]);
+
+  for (const [messageId, translation] of expected) {
+    assert.equal(ZH_CN_TRANSLATIONS.get(messageId), translation);
+  }
+});
+
 test("translation specs cover the injected sidebar delete messages", () => {
   assert.equal(ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThread"), "删除聊天");
   assert.equal(
