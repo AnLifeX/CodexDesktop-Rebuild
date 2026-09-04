@@ -16,6 +16,10 @@
  *   appears inside a function that also references featureName strings like
  *   `browser_use`, `computer_use`, `browser_use_external`
  *   Replace the call with !0
+ *
+ * Rule 5 — Bundled Browser cache integrity (main process):
+ *   Extend the upstream Visualize SKILL.md content check to Browser so an
+ *   incomplete versioned cache is reinstalled instead of skipped as current.
  */
 const fs = require("fs");
 const path = require("path");
@@ -387,6 +391,8 @@ function findFeatureDefaultPatches(ast, source) {
 
 const PLUGIN_FILTER_MARKER = "/* CodexRebuildPluginFilter */";
 const PLUGIN_STATSIG_MARKER = "/* CodexRebuildPluginStatsig */";
+const BUNDLED_PLUGIN_INTEGRITY_MARKER =
+  "/* CodexRebuildBundledPluginIntegrity */";
 const WEBVIEW_AVAILABILITY_TARGETS = 5;
 const WEBVIEW_STATSIG_TARGETS = 3;
 
@@ -1494,18 +1500,197 @@ function collectMainPeer(source, ast) {
   return { patches: dedupePatches(patches), already: new Set(already).size };
 }
 
+function comparisonOtherSide(node, operator, literal) {
+  if (node?.type !== "BinaryExpression" || node.operator !== operator) return null;
+  if (getLiteralValue(node.right) === literal) return node.left;
+  if (getLiteralValue(node.left) === literal) return node.right;
+  return null;
+}
+
+function collectBundledPluginIntegrity(source, ast, comments) {
+  const markerComments = exactMarkerComments(comments, BUNDLED_PLUGIN_INTEGRITY_MARKER);
+  const markerBody = BUNDLED_PLUGIN_INTEGRITY_MARKER.slice(2, -2).trim();
+  if (
+    comments.some(
+      (comment) =>
+        comment.value.includes("CodexRebuildBundledPluginIntegrity") &&
+        (comment.type !== "Block" || comment.value.trim() !== markerBody),
+    )
+  ) {
+    throw new Error("plugin bundled integrity marker is malformed");
+  }
+
+  const statusFunctions = [];
+  walk(ast, (node) => {
+    if (!isPluginFunctionNode(node)) return;
+    const body = source.slice(node.start, node.end);
+    if (
+      body.includes("bundled_plugin_status_unknown") &&
+      body.includes("status_check_failed") &&
+      body.includes("visualize") &&
+      body.includes("outdated")
+    ) {
+      statusFunctions.push(node);
+    }
+  });
+  if (statusFunctions.length !== 1) {
+    throw new Error(
+      `plugin bundled integrity expected exactly 1 status function, found ${statusFunctions.length}`,
+    );
+  }
+
+  const patches = [];
+  const already = [];
+  const statusFunction = statusFunctions[0];
+  const visualizeComparisons = [];
+  const browserComparisons = [];
+  const skillPathArguments = [];
+
+  walkOwnFunction(statusFunction, (node) => {
+    if (node.type === "BinaryExpression") {
+      for (const [literal, matches] of [
+        ["visualize", visualizeComparisons],
+        ["browser", browserComparisons],
+      ]) {
+        const operand = comparisonOtherSide(node, "!==", literal);
+        if (operand?.type === "MemberExpression" && pluginPropertyName(operand) === "name") {
+          matches.push({ node, operand });
+        }
+      }
+    }
+
+    if (
+      node.type !== "CallExpression" ||
+      node.callee?.type !== "MemberExpression" ||
+      pluginPropertyName(node.callee) !== "join" ||
+      !node.arguments.some((argument) => getLiteralValue(argument) === "skills") ||
+      !node.arguments.some((argument) => getLiteralValue(argument) === "SKILL.md")
+    ) {
+      return;
+    }
+    const skillArgument = node.arguments.find(
+      (argument) =>
+        getLiteralValue(argument) === "visualize" ||
+        argument.type === "ConditionalExpression",
+    );
+    if (skillArgument) skillPathArguments.push(skillArgument);
+  });
+
+  if (visualizeComparisons.length !== 1) {
+    throw new Error(
+      `plugin bundled integrity expected exactly 1 Visualize status comparison, found ${visualizeComparisons.length}`,
+    );
+  }
+  if (skillPathArguments.length !== 2) {
+    throw new Error(
+      `plugin bundled integrity expected exactly 2 SKILL.md paths, found ${skillPathArguments.length}`,
+    );
+  }
+
+  const visualize = visualizeComparisons[0];
+  const pluginNameSource = source.slice(visualize.operand.start, visualize.operand.end);
+  const matchingBrowser = browserComparisons.filter(
+    ({ operand }) => source.slice(operand.start, operand.end) === pluginNameSource,
+  );
+  if (matchingBrowser.length > 1) {
+    throw new Error("plugin bundled integrity found duplicate Browser status comparisons");
+  }
+  let statusGateCount = 0;
+  walkOwnFunction(statusFunction, (node) => {
+    if (
+      node.type !== "IfStatement" ||
+      node.consequent?.type !== "ReturnStatement" ||
+      !nodeContainsNode(node.test, visualize.node)
+    ) return;
+    let hasCurrentComparison = false;
+    walk(node.test, (candidate) => {
+      if (comparisonOtherSide(candidate, "!==", "current")) hasCurrentComparison = true;
+    });
+    if (hasCurrentComparison) statusGateCount += 1;
+  });
+  if (statusGateCount !== 1) {
+    throw new Error(
+      `plugin bundled integrity expected exactly 1 current-status gate, found ${statusGateCount}`,
+    );
+  }
+
+  const browser = matchingBrowser[0];
+  if (browser) {
+    if (
+      source.slice(browser.node.end, browser.node.end + BUNDLED_PLUGIN_INTEGRITY_MARKER.length) !==
+      BUNDLED_PLUGIN_INTEGRITY_MARKER
+    ) {
+      throw new Error("plugin bundled integrity Browser status marker is detached");
+    }
+    already.push(browser.node.start);
+  } else {
+    patches.push({
+      id: "bundled_browser_integrity_gate",
+      start: visualize.node.start,
+      end: visualize.node.end,
+      original: source.slice(visualize.node.start, visualize.node.end),
+      replacement: `${source.slice(visualize.node.start, visualize.node.end)}&&${pluginNameSource}!==\`browser\`${BUNDLED_PLUGIN_INTEGRITY_MARKER}`,
+    });
+  }
+
+  for (const argument of skillPathArguments) {
+    if (getLiteralValue(argument) === "visualize") {
+      patches.push({
+        id: "bundled_browser_integrity_skill_path",
+        start: argument.start,
+        end: argument.end,
+        original: source.slice(argument.start, argument.end),
+        replacement: `${pluginNameSource}===\`browser\`?\`control-in-app-browser\`:\`visualize\``,
+      });
+      continue;
+    }
+    if (
+      argument.type !== "ConditionalExpression" ||
+      getLiteralValue(argument.consequent) !== "control-in-app-browser" ||
+      getLiteralValue(argument.alternate) !== "visualize" ||
+      source.slice(argument.test.start, argument.test.end) !==
+        `${pluginNameSource}===\`browser\``
+    ) {
+      throw new Error("plugin bundled integrity Browser SKILL.md path is malformed");
+    }
+    already.push(argument.start);
+  }
+
+  if (markerComments.length !== (browser ? 1 : 0)) {
+    throw new Error(
+      `plugin bundled integrity attached markers expected ${browser ? 1 : 0}, found ${markerComments.length}`,
+    );
+  }
+  return {
+    patches: dedupePatches(patches),
+    already: new Set(already).size,
+  };
+}
+
 function patchPluginMainSource(source) {
   const { ast, comments } = parsePluginDocument(source, "plugin main");
   const model = buildPluginLexicalModel(ast);
   const defaults = collectMainDefaults(source, ast, model);
   const filter = collectMainFilter(source, ast, comments, model);
   const peer = collectMainPeer(source, ast);
+  const integrity = collectBundledPluginIntegrity(source, ast, comments);
   const counts = {
     defaults: makeCount(defaults.patches.length, defaults.already, defaults.total, "plugin defaults"),
     filter: makeCount(filter.patches.length, filter.already, 1, "plugin bundled filter"),
     peer: makeCount(peer.patches.length, peer.already, 1, "plugin peer auth"),
+    integrity: makeCount(
+      integrity.patches.length,
+      integrity.already,
+      3,
+      "plugin bundled integrity",
+    ),
   };
-  const patches = [...defaults.patches, ...filter.patches, ...peer.patches];
+  const patches = [
+    ...defaults.patches,
+    ...filter.patches,
+    ...peer.patches,
+    ...integrity.patches,
+  ];
   return {
     code: applyPatches(source, patches),
     status: patches.length > 0 ? "patched" : "already",

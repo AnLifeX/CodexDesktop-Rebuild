@@ -265,6 +265,7 @@ const STRUCTURAL_PLUGIN_MAIN = [
   "let fr={\"features.js_repl\":!1}",
   "let bs=[{isAvailable:({features:e})=>e.sites},{isAvailable:({features:e})=>e.inAppBrowserUseAllowed}],w=n=>bs.filter(r=>r.isAvailable({buildFlavor:i,features:n,platform:p}));function reconcile(n){let i=w(n);logger.info(`bundled_plugins_reconcile_started`);return install({marketplacePluginDescriptors:i})}",
   "function Ud(){let e=i.a.readFromPackageMetadata(),t=e!=null&&i.a.shouldIncludeBrowserUsePeerAuthorization(e,process.platform),n=!t&&Bd(process.env);if(!t&&!n)return()=>({authorized:!0})}",
+  "async function pluginStatus(e){try{let n=e.installedPlugin.source.path,r=await readManifest(n),i=compare({bundledManifest:e.bundledManifest,installedManifest:r});if(i!==`current`||e.bundledPlugin.name!==`visualize`)return i;let a=sourceRoot(e.bundledPlugin.source.path),[o,s]=await Promise.all([readFile({path:e.executionHostPath.join(a,`skills`,`visualize`,`SKILL.md`)}),readFile({path:e.executionHostPath.join(n,`skills`,`visualize`,`SKILL.md`)})]);return o===s?`current`:`outdated`}catch(t){logger.warning(`bundled_plugin_status_unknown`,{reason:`status_check_failed`});return`unknown`}}",
 ].join(";");
 const STRUCTURAL_PLUGIN_WEBVIEW = [
   "function F(e){let{enabled:n,hostId:r}=e,s=v(`1506311413`),c={featureName:`computer_use`,hostId:r},l=j(c),p=I({enabled:n}),y=l.enabled&&p.enabled&&s,b=l.isFetching,x=l.isLoading,_=y?l.reason:`statsig-disabled`;return{available:y,isFetching:b,isLoading:x,reason:_}}",
