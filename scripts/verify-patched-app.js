@@ -9,6 +9,7 @@ const {
 const { planArchivePlatform } = require("./patch-archive-delete");
 const { planSidebarPlatform } = require("./patch-sidebar-delete");
 const { validateLocalUpdaterSources } = require("./patch-local-updater");
+const { patchWindowsTraySource } = require("./patch-windows-tray");
 
 const PROJECT_ROOT = path.join(__dirname, "..");
 const TEXT_BUNDLE_EXTENSIONS = new Set([
@@ -926,6 +927,22 @@ function inspectLocalUpdaterContract(sources) {
 }
 
 const CONTRACT_DEFINITIONS = [
+  {
+    id: "windows-tray",
+    inspect(sources) {
+      const candidates = sources.filter(({ file, source }) =>
+        /\/main-[^/]+\.js$/.test(file) && /\.Tray\s*\(/.test(source));
+      if (candidates.length !== 1) return { detail: `expected 1 tray bundle, found ${candidates.length}` };
+      try {
+        if (patchWindowsTraySource(candidates[0].source).status !== "already") {
+          return { detail: "unsigned Windows tray still uses the upstream GUID" };
+        }
+        return { files: [candidates[0].file] };
+      } catch (error) {
+        return inspectionFailure(error);
+      }
+    },
+  },
   {
     id: "fast",
     inspect: inspectFastContract,

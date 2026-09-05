@@ -26,8 +26,26 @@ const LATEST_MAIN_FIXTURE = [
   "let fr={\"features.js_repl\":!1}",
   "let bs=[{isAvailable:({features:e})=>e.sites},{isAvailable:({features:e})=>e.inAppBrowserUseAllowed}],w=n=>bs.filter(r=>r.isAvailable({buildFlavor:i,features:n,platform:p}));function reconcile(n){let i=w(n);logger.info(`bundled_plugins_reconcile_started`);return install({marketplacePluginDescriptors:i})}",
   "function Ud(){let e=i.a.readFromPackageMetadata(),t=e!=null&&i.a.shouldIncludeBrowserUsePeerAuthorization(e,process.platform),n=!t&&Bd(process.env);if(!t&&!n)return()=>({authorized:!0})}",
-  "async function pluginStatus(e){try{let n=e.installedPlugin.source.path,r=await readManifest(n),i=compare({bundledManifest:e.bundledManifest,installedManifest:r});if(i!==`current`||e.bundledPlugin.name!==`visualize`)return i;let a=sourceRoot(e.bundledPlugin.source.path),[o,s]=await Promise.all([readFile({path:e.executionHostPath.join(a,`skills`,`visualize`,`SKILL.md`)}),readFile({path:e.executionHostPath.join(n,`skills`,`visualize`,`SKILL.md`)})]);return o===s?`current`:`outdated`}catch(t){logger.warning(`bundled_plugin_status_unknown`,{reason:`status_check_failed`});return`unknown`}}",
 ].join(";");
+
+test("preserves upstream skill status and removes the conflicting legacy Browser check", async () => {
+  const vm = require("node:vm");
+  const statusSource = "async function pluginStatus(e){let i=`current`;if(i!==`current`||e.bundledPlugin.name!==`visualize`)return i;let a=join(`skills`,`visualize`,`SKILL.md`),b=join(`cache`,`skills`,`visualize`,`SKILL.md`);return await readFile(a)===await readFile(b)?`current`:`outdated`}";
+  const upstream = LATEST_MAIN_FIXTURE + ";" + statusSource;
+  const clean = patchPluginMainSource(upstream).code;
+  assert.ok(clean.endsWith(statusSource));
+  const broken = clean.replace("name!==`visualize`", "name!==`visualize`&&e.bundledPlugin.name!==`browser`/* CodexRebuildBundledPluginIntegrity */")
+    .replaceAll("`skills`,`visualize`", "`skills`,e.bundledPlugin.name===`browser`?`control-in-app-browser`:`visualize`");
+  const repaired = patchPluginMainSource(broken);
+  assert.equal(repaired.status, "patched");
+  assert.equal(repaired.code, clean);
+  assert.equal(patchPluginMainSource(repaired.code).status, "already");
+  const status = vm.runInNewContext(statusSource + ";pluginStatus", {
+    join: (...parts) => parts.join("/"),
+    readFile: async () => { throw new Error("Legacy Browser skill intentionally absent under unified CUA"); },
+  });
+  assert.equal(await status({ bundledPlugin: { name: "browser" } }), "current");
+});
 
 test("patches and counts every latest use-is-plugins-enabled contract idempotently", () => {
   assert.equal(
@@ -73,19 +91,10 @@ test("patches and counts main defaults, bundled filter, and peer auth independen
     defaults: { patchable: 10, already: 0, total: 10 },
     filter: { patchable: 1, already: 0, total: 1 },
     peer: { patchable: 1, already: 0, total: 1 },
-    integrity: { patchable: 3, already: 0, total: 3 },
   });
   assert.equal((first.code.match(/(?:^|[:,])!0/g) ?? []).length >= 11, true);
   assert.match(first.code, /bs\.filter\(\(\)=>!0\)/);
   assert.match(first.code, /if\(!0\)return\(\)=>\(\{authorized:!0\}\)/);
-  assert.match(
-    first.code,
-    /name!==`visualize`&&e\.bundledPlugin\.name!==`browser`\/\* CodexRebuildBundledPluginIntegrity \*\//,
-  );
-  assert.equal(
-    (first.code.match(/name===`browser`\?`control-in-app-browser`:`visualize`/g) ?? []).length,
-    2,
-  );
 
   const second = patchPluginMainSource(first.code);
   assert.equal(second.status, "already");
@@ -93,7 +102,6 @@ test("patches and counts main defaults, bundled filter, and peer auth independen
     defaults: { patchable: 0, already: 10, total: 10 },
     filter: { patchable: 0, already: 1, total: 1 },
     peer: { patchable: 0, already: 1, total: 1 },
-    integrity: { patchable: 0, already: 3, total: 3 },
   });
   assert.equal(second.code, first.code);
 });
@@ -425,7 +433,6 @@ test("macOS matrix locates structural main and consolidated webview roles", () =
       defaults: { patchable: 10, already: 0, total: 10 },
       filter: { patchable: 1, already: 0, total: 1 },
       peer: { patchable: 1, already: 0, total: 1 },
-      integrity: { patchable: 3, already: 0, total: 3 },
     });
     assert.deepEqual(result.writes[0].result.webview.counts, {
       auth: { patchable: 1, already: 0, total: 1 },

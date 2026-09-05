@@ -7,6 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { verifyPatchedApp } = require("./verify-patched-app");
+const { patchWindowsTraySource } = require("./patch-windows-tray");
 const {
   makeMainMenuPatch,
   makePreloadPatch,
@@ -32,6 +33,7 @@ const UPDATER_BACKEND_FIXTURE = [
   "/* CodexRebuildLocalUpdater:file-end */",
 ].join("\n");
 const CONTRACT_IDS = [
+  "windows-tray",
   "fast",
   "plugin",
   "archive-delete",
@@ -265,7 +267,6 @@ const STRUCTURAL_PLUGIN_MAIN = [
   "let fr={\"features.js_repl\":!1}",
   "let bs=[{isAvailable:({features:e})=>e.sites},{isAvailable:({features:e})=>e.inAppBrowserUseAllowed}],w=n=>bs.filter(r=>r.isAvailable({buildFlavor:i,features:n,platform:p}));function reconcile(n){let i=w(n);logger.info(`bundled_plugins_reconcile_started`);return install({marketplacePluginDescriptors:i})}",
   "function Ud(){let e=i.a.readFromPackageMetadata(),t=e!=null&&i.a.shouldIncludeBrowserUsePeerAuthorization(e,process.platform),n=!t&&Bd(process.env);if(!t&&!n)return()=>({authorized:!0})}",
-  "async function pluginStatus(e){try{let n=e.installedPlugin.source.path,r=await readManifest(n),i=compare({bundledManifest:e.bundledManifest,installedManifest:r});if(i!==`current`||e.bundledPlugin.name!==`visualize`)return i;let a=sourceRoot(e.bundledPlugin.source.path),[o,s]=await Promise.all([readFile({path:e.executionHostPath.join(a,`skills`,`visualize`,`SKILL.md`)}),readFile({path:e.executionHostPath.join(n,`skills`,`visualize`,`SKILL.md`)})]);return o===s?`current`:`outdated`}catch(t){logger.warning(`bundled_plugin_status_unknown`,{reason:`status_check_failed`});return`unknown`}}",
 ].join(";");
 const STRUCTURAL_PLUGIN_WEBVIEW = [
   "function F(e){let{enabled:n,hostId:r}=e,s=v(`1506311413`),c={featureName:`computer_use`,hostId:r},l=j(c),p=I({enabled:n}),y=l.enabled&&p.enabled&&s,b=l.isFetching,x=l.isLoading,_=y?l.reason:`statsig-disabled`;return{available:y,isFetching:b,isLoading:x,reason:_}}",
@@ -409,9 +410,18 @@ function createFixture(t, options = {}) {
     writeMarkerFile(fixture, file);
   }
   installStructuralFeatureFixtures(fixture);
+  writeText(path.join(asarRoot, ".vite", "build", "main-tray.js"),
+    patchWindowsTraySource("new e.Tray(icons.defaultIcon,process.platform===`win32`&&e.app.isPackaged?guid(flavor):void 0)").code);
 
   return fixture;
 }
+
+test("rejects a tray bundle that still binds the official GUID to the EXE path", (t) => {
+  const fixture = createFixture(t);
+  writeText(path.join(fixture.asarRoot, ".vite", "build", "main-tray.js"),
+    "new e.Tray(icons.defaultIcon,process.platform===`win32`&&e.app.isPackaged?guid(flavor):void 0)");
+  assert.throws(() => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION), /windows-tray/);
+});
 
 function addMarker(fixture, marker) {
   fixture.includedMarkers.add(marker.id);
@@ -1252,6 +1262,7 @@ test("combines package mismatch with every unsatisfied contract", (t) => {
     version: "26.707.00000",
     omitMarkers: MARKERS.map((marker) => marker.id),
   });
+  writeText(path.join(fixture.asarRoot, ".vite", "build", "main-tray.js"), "const missingTray = true;");
 
   assert.throws(
     () => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION),
