@@ -213,6 +213,27 @@ test("translation specs cover the model picker and import screenshot gaps", () =
   }
 });
 
+test("plan mode uses 计划 while subscription plans keep 套餐", () => {
+  const expected = new Map([
+    ["composer.placeholder.plan", "描述你的任务以生成计划…"],
+    ["composerTips.planMode.action", "创建计划"],
+    ["implementPlanRequest.editedPlanError", "无法使用已编辑的计划，请重试"],
+    ["localConversation.planSummary.closeSidePanel", "关闭计划侧边栏"],
+    ["localConversation.planSummary.download", "下载计划"],
+    ["localConversation.planSummary.openInSidePanel", "在侧边栏中打开计划"],
+    ["localConversation.planSummary.title", "计划"],
+    [
+      "settings.general.experimentalFeatures.requestUserInput.description",
+      "允许 Codex 在计划模式之外提问。更改仅适用于新对话串",
+    ],
+  ]);
+  for (const [id, translation] of expected) {
+    assert.equal(ZH_CN_TRANSLATIONS.get(id), translation, id);
+    assert.equal(ZH_CN_FORCED_OVERRIDES.get(id), translation, id);
+  }
+  assert.equal(ZH_CN_FORCED_OVERRIDES.has("settings.usage.plan.title"), false);
+});
+
 test("translation specs cover the injected sidebar delete messages", () => {
   assert.equal(ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThread"), "删除聊天");
   assert.equal(
