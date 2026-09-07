@@ -194,6 +194,11 @@ test("translation specs cover the confirmed visible UI gaps", () => {
 test("translation specs cover the model picker and import screenshot gaps", () => {
   const expected = new Map([
     ["composer.modelPicker.modelList.open.ariaLabel", "选择模型"],
+    ["composer.modelPicker.modelList.heading", "选择模型"],
+    [
+      "composer.modelChangeDuringConversationWarning.v2.toast",
+      "在会话中途切换模型会降低性能。为获得最佳体验，请开始新会话，或切换回 {previousModel}。",
+    ],
     ["composer.modelPicker.default.label", "默认"],
     ["composer.modelPicker.default.description", "推荐模型组合"],
     ["serviceTier.ultrafast.description", "为时延敏感型任务提供最快响应"],
@@ -218,6 +223,36 @@ test("translation specs cover the injected sidebar delete messages", () => {
     ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThreadError"),
     "删除聊天失败",
   );
+});
+
+test("conditional notices preserve consequences, dynamic values, and rich-text actions", () => {
+  const expected = new Map([
+    ["feedback.dialog.uploadUnconfirmedMessage", /再次发送可能会产生重复记录/],
+    ["safetyBuffering.retryDialogHistoryDescription", /文件更改或其他已执行的操作都会保留/],
+    ["composer.computerUseAppApproval.disclosure", /控制截图是否用于训练/],
+    ["plugins.incentive.hostIdentityMismatch", /不领取奖励直接安装/],
+    ["codex.writingBlock.confirmClosePendingEdits", /待处理的编辑/],
+    ["codex.writingBlock.library.syncError", /<retry>重试<\/retry>/],
+    ["libraryNext.delete.fileDescription", /<bold>\{fileName\}<\/bold>.*30 天后永久删除/],
+    ["libraryNext.delete.folderDescription", /\{name\}.*所有文件和子文件夹.*永久删除/],
+    ["libraryNext.delete.filesTitle", /\{count, plural, one \{删除文件？\} other \{删除这些文件？\}\}/],
+    ["plugins.incentive.workspaceCreditsAdded", /\{credits, plural, one \{# 点额度\} other \{# 点额度\}\}/],
+    ["sidebarElectron.usageAlert.windowResetDateTime", /\{date\}.*\{time\}/],
+    ["browser.auth.error.accountDeactivated", /<helpLink>帮助中心<\/helpLink>/],
+    ["shareDialog.thread.copiedToast.publicResponseDescription", /任何拥有此链接的人/],
+    ["realtimeVoice.reasoningNotice.useLight", /轻度推理/],
+  ]);
+  for (const [id, pattern] of expected) {
+    assert.match(ZH_CN_TRANSLATIONS.get(id) ?? "", pattern, id);
+  }
+  for (const suffix of ["category", "summary", "recommendedStep", "handoff.category", "handoff.recommendedStep"]) {
+    const id = `localConversation.guidedDiagnostics.${suffix}`;
+    const translation = ZH_CN_TRANSLATIONS.get(id) ?? "";
+    assert.match(translation, /\{category, select,/);
+    for (const branch of ["network", "auth", "permissions", "workspace_setup", "sandbox_approval", "quota_rate_limit", "platform_incident", "unknown", "other"]) {
+      assert.ok(translation.includes(`${branch} {`), `${id}: missing ${branch}`);
+    }
+  }
 });
 
 test("translation specs cover the confirmed keyboard shortcut rows", () => {
@@ -311,6 +346,32 @@ test("translation specs cover the confirmed keyboard shortcut rows", () => {
   assert.deepEqual([...currentIds].sort(), [...expected.keys()].sort());
   for (const [messageId, translation] of expected) {
     assert.equal(ZH_CN_TRANSLATIONS.get(messageId), translation);
+  }
+});
+
+test("remaining application messages cover settings, library, usage, and tool cards", () => {
+  const expected = new Map([
+    ["settings.automations.destination.newChatEachRun", "每次运行新建聊天"],
+    ["settings.import.syncCategory.hooks", "钩子（Hooks）"],
+    ["settings.chatGpt.security.password.advancedProtectionDescription", "启用高级账户安全保护期间，密码登录不可用"],
+    ["libraryNext.items.relativeActivity", "{opened, select, true {{time}前打开} other {{time}前修改}}"],
+    ["settings.usage.subscriptionSharing.apps.limitLabel", "{app} 的每周限额：{limit, number, percent}"],
+    ["chatgpt.automation.nextRun", "下次运行：{nextRunAt, date, ::MMMd} {nextRunAt, time, short}"],
+    ["widgets.hermes.elicitation.toolApproval.title", "{agentName} 需要你的许可才能继续"],
+    ["widgets.audioPlayer.skipForward", "前进 {seconds} 秒"],
+    ["review.fileSource.copyRepoRelativePathButton", "复制相对于仓库的路径"],
+  ]);
+  for (const [id, translation] of expected) {
+    assert.equal(ZH_CN_TRANSLATIONS.get(id), translation, id);
+  }
+  for (const [id, argument, branches] of [
+    ["consumerUsage.series.recordedSource", "key", ["automation", "realtime_voice", "vscode", "unknown", "other"]],
+    ["consumerUsage.series.turnTrigger", "trigger", ["automation_heartbeat_scheduled", "send_user_message_async_question", "persistent_mode", "unknown", "other"]],
+  ]) {
+    const translation = ZH_CN_TRANSLATIONS.get(id) ?? "";
+    assert.ok(translation.startsWith(`{${argument}, select,`), id);
+    for (const branch of branches) assert.ok(translation.includes(`${branch} {`), `${id}: ${branch}`);
+    assert.ok(translation.includes("other {{key}}"), `${id}: preserve unknown values`);
   }
 });
 
