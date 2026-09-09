@@ -15,7 +15,7 @@ const metadata = createMetadata({
   releaseVersion: RELEASE,
   sourceSha: "a".repeat(40),
 });
-const PACKAGE_VERSION = `${OFFICIAL}-r0001`;
+const PACKAGE_VERSION = `${OFFICIAL}.1`;
 const local = "A".repeat(40) + ` Codex-${PACKAGE_VERSION}-full.nupkg 100\n`;
 const officialMetadata = createMetadata({
   upstreamVersion: "26.707.9981.0",

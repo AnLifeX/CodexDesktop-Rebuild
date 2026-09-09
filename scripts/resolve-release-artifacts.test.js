@@ -57,7 +57,7 @@ try {
     "26.707.72221-r10",
   );
 
-  const packageVersion = "26.707.72221-r0001";
+  const packageVersion = "26.707.72221.1";
   const releaseVersion = "26.707.72221-r1";
   touch(path.join(tmp, "public", `Codex-win-x64-${packageVersion}.zip`));
   touch(path.join(tmp, "public", `CodexSetup-win-x64-${packageVersion}.exe`));

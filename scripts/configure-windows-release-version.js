@@ -25,10 +25,10 @@ function compareNumericVersions(left, right) {
 }
 
 function parseWindowsReleaseVersion(version) {
-  const match = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)(?:-r(\d+))?$/);
+  const match = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)(?:(?:-r|\.)(\d+))?$/);
   if (!match) {
     throw new Error(
-      `Windows release version must be X.Y.Z or X.Y.Z-rN: ${version || "missing"}`,
+      `Windows version must be X.Y.Z, X.Y.Z-rN or X.Y.Z.N: ${version || "missing"}`,
     );
   }
   const officialVersion = `${match[1]}.${match[2]}.${match[3]}`;
@@ -54,7 +54,8 @@ function formatWindowsPackageVersion(officialVersion, revision) {
   if (!Number.isSafeInteger(value) || value < 1 || value > 9999) {
     throw new Error(`Windows rebuild revision must be between 1 and 9999: ${revision}`);
   }
-  return `${officialVersion}-r${String(value).padStart(4, "0")}`;
+  // NuGet orders -rN below the bare release; a fourth numeric part is newer.
+  return `${officialVersion}.${value}`;
 }
 
 function compareWindowsReleaseVersions(left, right) {

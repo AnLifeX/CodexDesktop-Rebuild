@@ -350,8 +350,12 @@ test("retains RELEASES SHA1 and size for package verification", () => {
   assert.deepEqual(parseReleaseManifestEntries("not-a-sha package.nupkg 12"), []);
 });
 
-test("client updater compares rebuild revisions numerically and formats them separately", async (t) => {
-  const releaseVersion = "26.707.72221-r0010";
+for (const [currentVersion, releaseVersion] of [
+  ["26.707.72221-r0002", "26.707.72221-r0010"],
+  ["26.707.72221", "26.707.72221.1"],
+  ["26.707.72221.1", "26.707.72221.10"],
+]) {
+test(`client updater recognizes ${currentVersion} -> ${releaseVersion}`, async (t) => {
   const fileName = `Codex-${releaseVersion}-full.nupkg`;
   const server = http.createServer((request, response) => {
     if (request.url.startsWith("/RELEASES")) {
@@ -365,7 +369,7 @@ test("client updater compares rebuild revisions numerically and formats them sep
   const updateUrl = `http://127.0.0.1:${server.address().port}`;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "updater-rebuild-version-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const appDir = path.join(root, "app-26.707.72221-r0002");
+  const appDir = path.join(root, `app-${currentVersion}`);
   fs.mkdirSync(appDir, { recursive: true });
   fs.writeFileSync(path.join(root, "Update.exe"), "fixture");
   const autoUpdater = new EventEmitter();
@@ -391,7 +395,7 @@ test("client updater compares rebuild revisions numerically and formats them sep
     require(id) {
       if (id === "electron") {
         return {
-          app: { isPackaged: true, getVersion: () => "26.707.72221-r0002", whenReady: () => Promise.resolve() },
+          app: { isPackaged: true, getVersion: () => currentVersion, whenReady: () => Promise.resolve() },
           autoUpdater,
           dialog: {},
           ipcMain: { handle() {} },
@@ -409,10 +413,11 @@ test("client updater compares rebuild revisions numerically and formats them sep
   await new Promise((resolve) => setImmediate(resolve));
   await context.__CodexRebuildUpdaterCommand.check();
   assert.equal(context.__CodexRebuildUpdaterLastState.status, "available");
-  assert.equal(context.__CodexRebuildUpdaterLastState.version, "26.707.72221-r0002");
+  assert.equal(context.__CodexRebuildUpdaterLastState.version, currentVersion);
   assert.equal(context.__CodexRebuildUpdaterLastState.updateVersion, releaseVersion);
   assert.ok(makeMainMenuPatch().includes("replace(/-r0*([1-9]\\d*)$/i,' (r$1)')"));
 });
+}
 
 test("query phase selects only a complete and cheaper delta path", async (t) => {
   const full = {
