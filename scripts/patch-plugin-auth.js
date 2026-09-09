@@ -387,6 +387,7 @@ function findFeatureDefaultPatches(ast, source) {
 
 const PLUGIN_FILTER_MARKER = "/* CodexRebuildPluginFilter */";
 const PLUGIN_STATSIG_MARKER = "/* CodexRebuildPluginStatsig */";
+const WINDOWS_COMPUTER_SURFACE_MARKER = "/* CodexRebuildWindowsComputerSurface */";
 const WEBVIEW_AVAILABILITY_TARGETS = 5;
 const WEBVIEW_STATSIG_TARGETS = 3;
 
@@ -1494,6 +1495,93 @@ function collectMainPeer(source, ast) {
   return { patches: dedupePatches(patches), already: new Set(already).size };
 }
 
+function collectWindowsComputerSurface(source, ast, model) {
+  if (source.includes(WINDOWS_COMPUTER_SURFACE_MARKER)) {
+    if (source.split(WINDOWS_COMPUTER_SURFACE_MARKER).length !== 2) {
+      throw new Error("Windows computer surface marker is malformed");
+    }
+    if (!source.includes("CUA_REPL_ENABLED_SURFACES")) {
+      throw new Error("Windows computer surface marker is detached from CUA config");
+    }
+    return { patches: [], already: 1, total: 1 };
+  }
+  if (!source.includes("CUA_REPL_ENABLED_SURFACES")) {
+    return { patches: [], already: 0, total: 0 };
+  }
+
+  const candidates = [];
+  walkWithParent(ast, (node, parent) => {
+    if (
+      node.type !== "CallExpression" ||
+      parent?.type !== "LogicalExpression" ||
+      parent.operator !== "&&" ||
+      parent.right !== node ||
+      node.callee?.type !== "MemberExpression" ||
+      pluginPropertyName(node.callee) !== "push" ||
+      getLiteralValue(node.arguments[0]) !== "computer"
+    ) return;
+    candidates.push({ gate: parent.left });
+  });
+  if (candidates.length !== 1 || candidates[0].gate.type !== "Identifier") {
+    throw new Error(
+      `Windows computer surface expected exactly 1 guarded computer push, found ${candidates.length}`,
+    );
+  }
+
+  const gateBinding = model.resolve(candidates[0].gate);
+  if (!gateBinding) {
+    throw new Error("Windows computer surface platform gate binding is unresolved");
+  }
+  const declarations = [];
+  walk(ast, (node) => {
+    if (
+      node.type === "VariableDeclarator" &&
+      node.id.type === "Identifier" &&
+      model.bindingForDeclaration(node.id) === gateBinding &&
+      node.init
+    ) declarations.push(node);
+  });
+  if (declarations.length !== 1 || !nodeContainsString(declarations[0].init, source, "serviceAppPath")) {
+    throw new Error("Windows computer surface platform gate is not the CUA service gate");
+  }
+
+  const platformChecks = [];
+  const computerUseChecks = [];
+  walkWithParent(declarations[0].init, (node, parent) => {
+    if (node.type === "MemberExpression" && pluginPropertyName(node) === "computerUse") {
+      computerUseChecks.push(node);
+    }
+    if (
+      node.type === "MemberExpression" &&
+      pluginPropertyName(node) === "platform" &&
+      parent?.type === "BinaryExpression" &&
+      parent.operator === "===" &&
+      (getLiteralValue(parent.left) === "darwin" || getLiteralValue(parent.right) === "darwin")
+    ) platformChecks.push(node);
+  });
+  if (platformChecks.length !== 1 || computerUseChecks.length !== 1) {
+    throw new Error("Windows computer surface platform gate shape changed");
+  }
+
+  const platform = source.slice(platformChecks[0].start, platformChecks[0].end);
+  const features = source.slice(
+    computerUseChecks[0].object.start,
+    computerUseChecks[0].object.end,
+  );
+  const gate = candidates[0].gate;
+  return {
+    patches: [{
+      id: "windows_computer_surface",
+      start: gate.start,
+      end: gate.end,
+      original: source.slice(gate.start, gate.end),
+      replacement: `(${source.slice(gate.start, gate.end)}||(${platform}===\`win32\`&&${features}.computerUse&&${features}.computerUseNodeRepl)${WINDOWS_COMPUTER_SURFACE_MARKER})`,
+    }],
+    already: 0,
+    total: 1,
+  };
+}
+
 function patchPluginMainSource(source) {
   const originalSource = source;
   // Unified CUA deliberately removes the legacy Browser skill. Undo the old
@@ -1510,12 +1598,26 @@ function patchPluginMainSource(source) {
   const defaults = collectMainDefaults(source, ast, model);
   const filter = collectMainFilter(source, ast, comments, model);
   const peer = collectMainPeer(source, ast);
+  const windowsComputerSurface = collectWindowsComputerSurface(source, ast, model);
   const counts = {
     defaults: makeCount(defaults.patches.length, defaults.already, defaults.total, "plugin defaults"),
     filter: makeCount(filter.patches.length, filter.already, 1, "plugin bundled filter"),
     peer: makeCount(peer.patches.length, peer.already, 1, "plugin peer auth"),
   };
-  const patches = [...defaults.patches, ...filter.patches, ...peer.patches];
+  if (windowsComputerSurface.total > 0) {
+    counts.windowsComputerSurface = makeCount(
+      windowsComputerSurface.patches.length,
+      windowsComputerSurface.already,
+      1,
+      "Windows computer surface",
+    );
+  }
+  const patches = [
+    ...defaults.patches,
+    ...filter.patches,
+    ...peer.patches,
+    ...windowsComputerSurface.patches,
+  ];
   return {
     code: applyPatches(source, patches),
     status: source !== originalSource || patches.length > 0 ? "patched" : "already",

@@ -106,6 +106,30 @@ test("patches and counts main defaults, bundled filter, and peer auth independen
   assert.equal(second.code, first.code);
 });
 
+test("adds the Windows computer CUA surface without changing macOS", () => {
+  const vm = require("node:vm");
+  const source = LATEST_MAIN_FIXTURE + ";" + [
+    "function cuaConfig(t,l,u,f,h){let p=f&&l.platform===`darwin`&&t.computerUse&&u.enabled&&u.paths.serviceAppPath!=null;f&&h.push(`browser`),p&&h.push(`computer`);return{CUA_REPL_ENABLED_SURFACES:h.join(`,`)}}",
+  ].join(";");
+  const first = patchPluginMainSource(source);
+  assert.deepEqual(first.counts.windowsComputerSurface, { patchable: 1, already: 0, total: 1 });
+  assert.match(first.code, /CodexRebuildWindowsComputerSurface/);
+  const cuaConfig = vm.runInNewContext(first.code + ";cuaConfig");
+  const features = { computerUse: true, computerUseNodeRepl: true };
+  assert.equal(
+    cuaConfig(features, { platform: "win32" }, { enabled: true, paths: { serviceAppPath: null } }, false, []).CUA_REPL_ENABLED_SURFACES,
+    "computer",
+  );
+  assert.equal(
+    cuaConfig(features, { platform: "darwin" }, { enabled: true, paths: { serviceAppPath: "Sky.app" } }, true, []).CUA_REPL_ENABLED_SURFACES,
+    "browser,computer",
+  );
+  assert.deepEqual(
+    patchPluginMainSource(first.code).counts.windowsComputerSurface,
+    { patchable: 0, already: 1, total: 1 },
+  );
+});
+
 test("requires every desktop feature default exactly once in one object", () => {
   const duplicatedDefault = LATEST_MAIN_FIXTURE.replace(
     "control:!1,multiWindow:!1",
