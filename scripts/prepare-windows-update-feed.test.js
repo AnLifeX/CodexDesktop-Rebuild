@@ -65,6 +65,20 @@ test("publishes the newly generated delta when no previous chain manifest exists
   );
 });
 
+test("prepares and validates an upgrade from a bare release to a numeric revision", async (t) => {
+  const fixture = createFixture(t);
+  const base = addPackage(fixture, "26.903.61454", "full", 100);
+  const delta = addPackage(fixture, "26.903.61454.1", "delta", 10);
+  const full = addPackage(fixture, "26.903.61454.1", "full", 100);
+  writeSourceReleases(fixture, [base, delta, full]);
+  const result = prepareWindowsUpdateFeed({ source: fixture.source, dest: fixture.dest });
+  assert.deepEqual(result.manifest.deltas.map(({ fromVersion, toVersion }) => [fromVersion, toVersion]),
+    [[base.version, full.version]]);
+  const { validateWindowsReleaseFeed } = require("./validate-windows-release-feed");
+  const validated = await validateWindowsReleaseFeed({ root: fixture.dest, version: full.version });
+  assert.equal(validated.deltas[0].fileName, delta.filename);
+});
+
 test("keeps a contiguous delta suffix and the latest full package", (t) => {
   const fixture = createFixture(t);
   const full1 = addPackage(fixture, "1.0.0", "full", 100);

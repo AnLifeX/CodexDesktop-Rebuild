@@ -34,11 +34,32 @@ test("parses and compares official+rN release versions numerically", () => {
     releaseVersion: `${OFFICIAL_VERSION}-r2`,
   });
   assert.equal(formatWindowsReleaseVersion(OFFICIAL_VERSION, 10), `${OFFICIAL_VERSION}-r10`);
-  assert.equal(formatWindowsPackageVersion(OFFICIAL_VERSION, 10), `${OFFICIAL_VERSION}-r0010`);
+  assert.equal(formatWindowsPackageVersion(OFFICIAL_VERSION, 10), `${OFFICIAL_VERSION}.10`);
   assert.equal(parseWindowsReleaseVersion(`${OFFICIAL_VERSION}-r0010`).revision, 10);
   assert.ok(compareWindowsReleaseVersions(`${OFFICIAL_VERSION}-r10`, `${OFFICIAL_VERSION}-r2`) > 0);
   assert.ok(compareWindowsReleaseVersions(`${OFFICIAL_VERSION}-r1`, "26.707.62121") > 0);
   assert.ok(compareNumericVersions(NEXT_MSIX, CURRENT_MSIX) > 0);
+});
+
+test("numeric package revisions are newer in Squirrel's own NuGet comparer", {
+  skip: process.platform !== "win32",
+}, () => {
+  const { execFileSync } = require("node:child_process");
+  const squirrel = path.resolve(__dirname, "../node_modules/electron-winstaller/vendor/Squirrel.exe");
+  const versions = [OFFICIAL_VERSION, formatWindowsPackageVersion(OFFICIAL_VERSION, 1), formatWindowsPackageVersion(OFFICIAL_VERSION, 10)];
+  const command = `
+    $ErrorActionPreference = 'Stop'
+    $assembly = [Reflection.Assembly]::LoadFrom('${squirrel.replaceAll("'", "''")}')
+    $parse = $assembly.GetType('NuGet.SemanticVersion').GetMethod('Parse', [type[]]@([string]))
+    $versions = @(${versions.map(version => `'${version}'`).join(",")})
+    for ($i = 1; $i -lt $versions.Count; $i++) {
+      $previous = $parse.Invoke($null, @($versions[$i - 1]))
+      $next = $parse.Invoke($null, @($versions[$i]))
+      if ($next.CompareTo($previous) -le 0) { throw 'Rebuild package is not newer in Squirrel' }
+    }
+  `;
+  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { stdio: "pipe" });
+  assert.equal(compareWindowsReleaseVersions(versions[1], `${OFFICIAL_VERSION}-r1`), 0);
 });
 
 test("new official internal versions use the bare official version", () => {
@@ -171,7 +192,7 @@ test("writes release metadata to packages and tracks Windows versions separately
     internalAppVersion: OFFICIAL_VERSION,
     revision: 1,
     releaseVersion: `${OFFICIAL_VERSION}-r1`,
-    packageVersion: `${OFFICIAL_VERSION}-r0001`,
+    packageVersion: `${OFFICIAL_VERSION}.1`,
   };
 
   updatePackageVersion(packageFile, metadata);
@@ -183,7 +204,7 @@ test("writes release metadata to packages and tracks Windows versions separately
     codexRebuildOfficialVersion: OFFICIAL_VERSION,
     codexRebuildRevision: 1,
     codexRebuildReleaseVersion: `${OFFICIAL_VERSION}-r1`,
-    codexRebuildPackageVersion: `${OFFICIAL_VERSION}-r0001`,
+    codexRebuildPackageVersion: `${OFFICIAL_VERSION}.1`,
     codexRebuildWindowsMsixVersion: NEXT_MSIX,
   });
   assert.deepEqual(JSON.parse(fs.readFileSync(trackedFile)).platforms.Windows, {
@@ -192,7 +213,7 @@ test("writes release metadata to packages and tracks Windows versions separately
     msixVersion: NEXT_MSIX,
     rebuildRevision: 1,
     releaseVersion: `${OFFICIAL_VERSION}-r1`,
-    packageVersion: `${OFFICIAL_VERSION}-r0001`,
+    packageVersion: `${OFFICIAL_VERSION}.1`,
     build: "",
   });
 });
@@ -206,14 +227,14 @@ test("writes explicit GitHub outputs for official, MSIX, revision, and release v
     internalAppVersion: OFFICIAL_VERSION,
     revision: 1,
     releaseVersion: `${OFFICIAL_VERSION}-r1`,
-    packageVersion: `${OFFICIAL_VERSION}-r0001`,
+    packageVersion: `${OFFICIAL_VERSION}.1`,
   }, output);
   const text = fs.readFileSync(output, "utf8");
   assert.match(text, new RegExp(`windows_msix_version=${NEXT_MSIX.replaceAll(".", "\\.")}`));
   assert.match(text, new RegExp(`windows_internal_app_version=${OFFICIAL_VERSION.replaceAll(".", "\\.")}`));
   assert.match(text, /windows_rebuild_revision=1/);
   assert.match(text, new RegExp(`windows_release_version=${OFFICIAL_VERSION.replaceAll(".", "\\.")}-r1`));
-  assert.match(text, new RegExp(`windows_package_version=${OFFICIAL_VERSION.replaceAll(".", "\\.")}-r0001`));
+  assert.match(text, new RegExp(`windows_package_version=${OFFICIAL_VERSION.replaceAll(".", "\\.")}.1`));
 });
 
 test("CLI reads the extracted Windows internal version before overwriting package metadata", (t) => {

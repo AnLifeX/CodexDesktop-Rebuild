@@ -50,7 +50,7 @@ function parseDeclaredPackages(releasesPath, version) {
     }
     const [, rawSha1, fileName, rawSize] = match;
     const packageMatch = fileName.match(
-      /^Codex-(\d+\.\d+\.\d+(?:-r\d+)?)-(full|delta)\.nupkg$/,
+      /^Codex-(\d+\.\d+\.\d+(?:(?:-r|\.)\d+)?)-(full|delta)\.nupkg$/,
     );
     const size = Number(rawSize);
     if (!packageMatch || !Number.isSafeInteger(size) || size <= 0) {

@@ -80,7 +80,7 @@ function releaseVersionsFromReleases(text) {
   const versions = new Set();
   for (const line of String(text || "").split(/\r?\n/)) {
     const parts = line.trim().split(/\s+/);
-    const match = parts[1]?.match(/^Codex-(\d+\.\d+\.\d+(?:-r\d+)?)-(?:full|delta)\.nupkg$/i);
+    const match = parts[1]?.match(/^Codex-(\d+\.\d+\.\d+(?:(?:-r|\.)\d+)?)-(?:full|delta)\.nupkg$/i);
     if (match) {
       const parsed = parseWindowsReleaseVersion(match[1]);
       versions.add(parsed.revision > 0

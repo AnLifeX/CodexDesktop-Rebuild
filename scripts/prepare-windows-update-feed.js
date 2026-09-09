@@ -64,7 +64,7 @@ function parseReleaseLine(line) {
   if (!match) return null;
   const [, sha1, filename, rawSize] = match;
   const packageMatch = filename.match(
-    /^Codex-(\d+\.\d+\.\d+(?:-r\d+)?)-(full|delta)\.nupkg$/,
+    /^Codex-(\d+\.\d+\.\d+(?:(?:-r|\.)\d+)?)-(full|delta)\.nupkg$/,
   );
   const size = Number(rawSize);
   if (!packageMatch || !Number.isSafeInteger(size) || size <= 0) return null;
