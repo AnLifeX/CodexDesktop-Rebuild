@@ -20,12 +20,12 @@ const patched = patchSerialportLoadBindings(source);
 assert.notStrictEqual(patched, source);
 assert.ok(patched.includes("app.asar.unpacked"));
 assert.ok(patched.includes("codex-native"));
-assert.ok(patched.includes("serialport.node"));
+assert.ok(patched.includes("bindings.node"));
 assert.ok(patched.includes("node_gyp_build_1.default"));
 assert.strictEqual(patchSerialportLoadBindings(patched), patched);
 
 const serialportRelocation = WINDOWS_SHORT_UNPACKED_NATIVE_FILES.find((entry) =>
-  entry.source.endsWith("serialport.node"),
+  entry.source.endsWith("bindings.node"),
 );
 assert.ok(serialportRelocation, "serialport native binding should be relocated");
-assert.strictEqual(serialportRelocation.dest, "codex-native/serialport.node");
+assert.strictEqual(serialportRelocation.dest, "codex-native/bindings.node");

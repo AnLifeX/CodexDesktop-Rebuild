@@ -213,6 +213,9 @@ function snapshotLocalUpdaterTargets(asarRoot, relativePaths) {
       "setStatus(isDownloadComplete(downloadedBytes,activeDownloadSize)?'preparing':'downloading'",
     ),
   );
+  assert.ok(bootstrap.includes("for(let candidate of files)try{"));
+  assert.ok(bootstrap.includes("activeDownloadAttempts=new Set"));
+  assert.ok(bootstrap.includes("localHandoff.fetchingItems.add(requestedItem.fileName)"));
   assert.ok(bootstrap.includes("globalThis.__CodexRebuildUpdaterLastState=payload"));
   assert.ok(bootstrap.includes("globalThis.__CodexRebuildUpdaterMenuSetState?.(payload)"));
   assert.ok(bootstrap.includes("setStatus('ready',{error:null,downloadedBytes:state.updateSize"));
@@ -1215,8 +1218,8 @@ test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appen
   const patched = patchWebviewMenuBarCode(source);
 
   assert.match(patched, /function codexRebuildUpdaterTitlebar\(\)/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v7/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v7/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v8/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v8/);
   const menuRoot = patched.indexOf("children:[(0,Ji.jsx)(`button`,{className:i,children:r}),null");
   const attachment = patched.indexOf("/* CodexRebuildUpdaterTitlebar:descriptor:start */");
   assert.ok(menuRoot >= 0 && attachment > menuRoot, "updater must be attached to the modern menu root");
@@ -1365,15 +1368,15 @@ test("rejects stale or mismatched canonical updater block versions", () => {
   );
 });
 
-test("migrates the v6 updater layers to the query-time delta-chain contract", () => {
-  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 7);
+test("migrates the v7 updater layers to aggregate delta progress", () => {
+  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 8);
   const current = applyLocalUpdaterPlan(makeCleanLocalUpdaterSources());
   const legacy = {
     packageSource: current.packageSource,
     files: Object.fromEntries(
       Object.entries(current.files).map(([file, source]) => [
         file,
-        source.replaceAll(":v7 */", ":v6 */"),
+        source.replaceAll(":v8 */", ":v7 */"),
       ]),
     ),
   };
@@ -1386,7 +1389,7 @@ test("migrates the v6 updater layers to the query-time delta-chain contract", ()
   );
   assert.ok(
     Object.values(migrated.files).every(
-      (source) => !source.includes(":v6 */"),
+      (source) => !source.includes(":v7 */"),
     ),
   );
   assert.equal(planLocalUpdaterSources(migrated).status, "already");

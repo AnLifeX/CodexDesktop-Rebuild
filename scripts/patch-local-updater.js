@@ -19,8 +19,8 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 7;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6];
+const LOCAL_UPDATER_CONTRACT_VERSION = 8;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7];
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";
@@ -449,22 +449,15 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       if(existing)return Promise.resolve(existing);
       let pending=pendingSources.get(requestedItem.fileName);
       if(pending)return pending;
-      let settleFallback;
-      activeDownloadSettlement=new Promise(resolve=>{settleFallback=resolve});
       pending=(async()=>{
         try{
-          if(localHandoff){localHandoff.fetchingItem=requestedItem;localHandoff.item=requestedItem}
+          if(localHandoff)localHandoff.fetchingItems.add(requestedItem.fileName);
           let result=await downloadPackage(requestedItem,requestedProxyPrefixes,generation);
           sources.set(requestedItem.fileName,result.filePath);
-          if(localHandoff){
-            localHandoff.fetchingItem=null;
-            let elapsedMs=state.downloadStartedAt?Date.now()-state.downloadStartedAt:null;
-            setStatus('preparing',{error:null,downloadedBytes:requestedItem.size,resumedBytes:result.resumedFrom||0,downloadSource:result.source,elapsedMs,activeDownloadFile:requestedItem.fileName,activeDownloadSize:requestedItem.size});
-          }
           return result.filePath;
         }finally{
+          if(localHandoff){localHandoff.fetchingItems.delete(requestedItem.fileName);updateProgress()}
           pendingSources.delete(requestedItem.fileName);
-          settleFallback();
         }
       })();
       pendingSources.set(requestedItem.fileName,pending);
@@ -514,7 +507,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       let address=server.address();
       if(!address||typeof address==='string'){try{server.close()}catch{}finish(Error('local update feed failed to bind'));return}
       let feedUrl='http://127.0.0.1:'+address.port+basePath.slice(0,-1);
-      localHandoff={server,sockets,item,items,sources,pendingSources,fetchingItem:null,generation,feedUrl};
+      localHandoff={server,sockets,item,items,sources,pendingSources,fetchingItems:new Set,generation,feedUrl};
       cancelledLocalHandoff=!1;
       try{
         autoUpdater.setFeedURL({url:feedUrl});
@@ -524,7 +517,8 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       }catch(error){closeLocalHandoff();finish(error)}
     });
   });
-  let activeDownloadAttempt=null,activeDownloadSettlement=Promise.resolve(),downloadGeneration=0;
+  let activeDownloadAttempts=new Set,pendingDownloadCount=0,downloadSettlers=[],downloadGeneration=0;
+  let waitForDownloads=()=>pendingDownloadCount?new Promise(resolve=>downloadSettlers.push(resolve)):Promise.resolve();
   let cancellationError=()=>{let error=Error('update download cancelled');error.code='CODEX_REBUILD_UPDATE_CANCELLED';return error};
   let isCancellationError=error=>error?.code==='CODEX_REBUILD_UPDATE_CANCELLED';
   let downloadAttempt=(target,filePath,expectedSize,generation,redirects=0)=>new Promise((resolve,reject)=>{
@@ -534,7 +528,8 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     if(offset>expectedSize){try{fs.rmSync(filePath,{force:!0})}catch{}offset=0}
     let headers=offset>0?{Range:'bytes='+offset+'-'}:{};
     let client=target.startsWith('http:')?http:https,settled=!1,pendingError=null,req,output=null,attempt={generation,req:null,response:null};
-    let complete=(error,value)=>{if(settled)return;settled=!0;if(activeDownloadAttempt===attempt)activeDownloadAttempt=null;error?reject(error):resolve(value)};
+    pendingDownloadCount+=1;
+    let complete=(error,value)=>{if(settled)return;settled=!0;activeDownloadAttempts.delete(attempt);if(--pendingDownloadCount===0){let settlers=downloadSettlers;downloadSettlers=[];for(let settle of settlers)settle()}error?reject(error):resolve(value)};
     let finish=(error,value)=>{
       if(settled||pendingError)return;
       if(error&&output&&!output.closed){
@@ -571,7 +566,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       res.on('data',chunk=>{
         received+=chunk.length;
         let now=Date.now();
-        if(now-lastEmit>=500){lastEmit=now;state={...state,downloadedBytes:received,elapsedMs:state.downloadStartedAt?now-state.downloadStartedAt:null,downloadSource:target};emit()}
+        if(now-lastEmit>=500){lastEmit=now;updateProgress()}
       });
       res.on('error',finish);
       output.on('error',finish);
@@ -579,7 +574,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       res.pipe(output);
     });
     attempt.req=req;
-    activeDownloadAttempt=attempt;
+    activeDownloadAttempts.add(attempt);
     req.setTimeout(45000,()=>req.destroy(Error('download inactivity timeout')));
     req.on('error',finish);
   });
@@ -615,7 +610,8 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     for(let target of packageUrls(item.fileName,requestedProxyPrefixes)){
       try{
         if(generation!==downloadGeneration)throw cancellationError();
-        setStatus('downloading',{error:null,activeDownloadFile:item.fileName,activeDownloadSize:item.size,downloadedBytes:existing,resumedBytes:existing,downloadSource:target});
+        setStatus('downloading',{error:null,activeDownloadFile:item.fileName,activeDownloadSize:state.updateSize||item.size,downloadedBytes:state.downloadedBytes||0,resumedBytes:existing,downloadSource:target});
+        updateProgress();
         let result=await downloadAttempt(target,partialPath,item.size,generation);
         if(generation!==downloadGeneration)throw cancellationError();
         let verified=await verifyPackage(partialPath,item);
@@ -631,7 +627,8 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
         try{existing=fs.existsSync(partialPath)?fs.statSync(partialPath).size:0}catch{existing=0}
         if(isCancellationError(error)||generation!==downloadGeneration)throw cancellationError();
         errors.push(target+': '+(error&&error.message?error.message:String(error)));
-        setStatus('downloading',{downloadedBytes:existing,resumedBytes:existing,downloadSource:target});
+        setStatus('downloading',{resumedBytes:existing,downloadSource:target});
+        updateProgress();
       }
     }
     throw Error('package download failed; '+existing+' bytes retained for resume; '+errors.join(' | '));
@@ -685,38 +682,17 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     return Number.isFinite(d)&&Number.isFinite(t)&&t>0&&d>=t;
   };
   let updateProgress=()=>{
-    if(!downloading)return;
-    if(localHandoff&&!localHandoff.fetchingItem){
-      let elapsedMs=state.downloadStartedAt?Date.now()-state.downloadStartedAt:null;
-      setStatus('preparing',{downloadedBytes:localHandoff.item.size,elapsedMs,activeDownloadFile:localHandoff.item.fileName,activeDownloadSize:localHandoff.item.size});
-      return;
-    }
+    if(!downloading||state.status==='cancelling')return;
     let file=state.activeDownloadFile||state.updateFile||(state.updateVersion?('Codex-'+state.updateVersion+'-full.nupkg'):null);
-    let activeDownloadSize=state.activeDownloadSize||state.updateSize||null;
-    let downloadedBytes=state.downloadedBytes||0;
-    if(file){
-      try{
-        let p=path.join(packagesDir,file);
-        let partial=path.join(stagingDir,file+'.partial');
-        let legacyPartial=p+'.partial';
-        if(fs.existsSync(partial)||fs.existsSync(legacyPartial)||fs.existsSync(p)){
-          downloadedBytes=fs.statSync(fs.existsSync(partial)?partial:fs.existsSync(legacyPartial)?legacyPartial:p).size;
-          let known=state.updateFiles?.find?.(item=>item.fileName===file)?.size;
-          if(Number.isFinite(known))activeDownloadSize=known;
-        }else if(state.updateVersion&&fs.existsSync(packagesDir)){
-          let prefix='Codex-'+state.updateVersion+'-';
-          let match=fs.readdirSync(packagesDir).filter(name=>name.startsWith(prefix)&&/\\.nupkg$/i.test(name)).sort((a,b)=>{
-            try{return fs.statSync(path.join(packagesDir,b)).mtimeMs-fs.statSync(path.join(packagesDir,a)).mtimeMs}catch{return 0}
-          })[0];
-          if(match){
-            file=match;
-            downloadedBytes=fs.statSync(path.join(packagesDir,match)).size;
-            let known=state.updateFiles?.find?.(item=>item.fileName===match)?.size;
-            if(Number.isFinite(known))activeDownloadSize=known;
-          }
-        }
-      }catch{}
-    }
+    let files=state.updateMode==='delta-chain'?(state.updateFiles||[]).filter(item=>item?.kind==='delta'):(state.updateFiles||[]).filter(item=>item?.fileName===state.updateFile);
+    let active=state.updateFiles?.find?.(item=>item.fileName===file);
+    let activeDownloadSize=state.updateSize||state.activeDownloadSize||null;
+    if(active&&!files.some(item=>item.fileName===active.fileName)){files=[active];activeDownloadSize=active.size}
+    let downloadedBytes=files.length?0:state.downloadedBytes||0;
+    for(let candidate of files)try{
+      let p=path.join(packagesDir,candidate.fileName),partial=path.join(stagingDir,candidate.fileName+'.partial'),legacyPartial=p+'.partial';
+      if(fs.existsSync(partial)||fs.existsSync(legacyPartial)||fs.existsSync(p))downloadedBytes+=Math.min(fs.statSync(fs.existsSync(partial)?partial:fs.existsSync(legacyPartial)?legacyPartial:p).size,candidate.size);
+    }catch{}
     let elapsedMs=state.downloadStartedAt?Date.now()-state.downloadStartedAt:null;
     setStatus(isDownloadComplete(downloadedBytes,activeDownloadSize)?'preparing':'downloading',{downloadedBytes,elapsedMs,activeDownloadFile:file,activeDownloadSize});
   };
@@ -810,16 +786,14 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     checking=!1;
     downloading=!0;
     let generation=++downloadGeneration;
-    let settleDownload;
-    activeDownloadSettlement=new Promise(resolve=>{settleDownload=resolve});
     let started=Date.now();
     let retained=0;
     try{retained=fs.statSync(path.join(stagingDir,item.fileName+'.partial')).size}catch{}
-    setStatus('downloading',{error:null,downloadStartedAt:started,downloadedBytes:retained,resumedBytes:retained,elapsedMs:0,version:getInstalledVersion(),activeDownloadFile:item.fileName,activeDownloadSize:item.size});
+    setStatus('downloading',{error:null,downloadStartedAt:started,downloadedBytes:retained,resumedBytes:retained,elapsedMs:0,version:getInstalledVersion(),activeDownloadFile:item.fileName,activeDownloadSize:state.updateSize||item.size});
     startProgress();
     try{
       let result=await downloadPackage(item,requestedProxyPrefixes,generation);
-      setStatus('preparing',{error:null,downloadedBytes:item.size,resumedBytes:result.resumedFrom||retained,downloadSource:result.source});
+      setStatus(state.updateMode==='delta-chain'&&state.updatePackageCount>1?'downloading':'preparing',{error:null,downloadedBytes:item.size,resumedBytes:result.resumedFrom||retained,downloadSource:result.source,activeDownloadSize:state.updateSize||item.size});
       await startLocalHandoff(state.updateFiles,item,result.filePath,requestedProxyPrefixes,generation);
     }catch(e){
       if(isCancellationError(e)||generation!==downloadGeneration){
@@ -833,22 +807,18 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
       let resumableBytes=0;
       try{resumableBytes=fs.statSync(path.join(stagingDir,item.fileName+'.partial')).size}catch{}
       setStatus('error',{error:message,lastCheckedAt:Date.now(),downloadedBytes:resumableBytes,resumedBytes:resumableBytes});
-    }finally{
-      settleDownload();
     }
     return emit();
   };
   let cancelDownload=async()=>{
     if(!downloading||state.status!=='downloading')return emit();
-    let settlement=activeDownloadSettlement;
+    let settlement=waitForDownloads();
     downloadGeneration+=1;
     if(localHandoff){cancelledLocalHandoff=!0;closeLocalHandoff()}
-    let attempt=activeDownloadAttempt;
-    activeDownloadAttempt=null;
     let error=cancellationError();
-    try{
-      if(attempt?.req&&!attempt.req.destroyed)attempt.req.destroy(error);
-      else if(attempt?.response&&!attempt.response.destroyed)attempt.response.destroy(error);
+    for(let attempt of activeDownloadAttempts)try{
+      if(attempt.req&&!attempt.req.destroyed)attempt.req.destroy(error);
+      else if(attempt.response&&!attempt.response.destroyed)attempt.response.destroy(error);
     }catch{}
     stopProgress();
     let resumableBytes=0;
