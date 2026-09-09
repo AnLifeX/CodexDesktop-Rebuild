@@ -33,7 +33,7 @@ function loadInstallerInternals() {
   const filename = path.join(__dirname, "build-win-installer.js");
   const isolatedSource = source.replace(
     /main\(\)\.catch\(\(error\) => \{[\s\S]*?\n\}\);\s*$/,
-    "module.exports = { createLegacyExecutableAlias, markSquirrelAware, removeSkyJsDependencyCache, resolvePrimaryExecutableNameFromManifest, resolveSquirrelReleaseOptions };\n",
+    "module.exports = { compactSkyJsDependencyCache, createLegacyExecutableAlias, markSquirrelAware, resolvePrimaryExecutableNameFromManifest, resolveSquirrelReleaseOptions };\n",
   );
   const module = { exports: {} };
   vm.runInNewContext(isolatedSource, {
@@ -236,7 +236,7 @@ function assertRequiredDeltaWindowsInstallerWorkflow(workflow, { supportsSkip })
   assert.doesNotMatch(workflow, /Back up guaranteed full Windows installer|Finalize Windows installer output/);
 }
 
-test("removes only the upstream Sky dependency cache from installer staging", (t) => {
+test("compacts every used Sky dependency and rewrites its imports", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-sky-cache-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const cache = path.join(
@@ -249,17 +249,49 @@ test("removes only the upstream Sky dependency cache from installer staging", (t
     "dist",
     "js-dependency-cache",
   );
-  const keep = path.join(root, "cua_node", "bin", "keep.txt");
-  fs.mkdirSync(cache, { recursive: true });
-  fs.mkdirSync(path.dirname(keep), { recursive: true });
-  fs.writeFileSync(path.join(cache, "cache.js"), "cache");
-  fs.writeFileSync(keep, "keep");
+  const dependency = path.join(cache, "shared-v1", "nested", "node_modules", "tslib", "tslib.es6.js");
+  const dist = path.dirname(cache);
+  const entry = path.join(dist, "project", "entry.js");
+  const nestedEntry = path.join(dist, "project", "nested", "entry.mjs");
+  fs.mkdirSync(path.dirname(dependency), { recursive: true });
+  fs.mkdirSync(path.dirname(nestedEntry), { recursive: true });
+  fs.writeFileSync(dependency, "export const marker = true;\n");
+  fs.writeFileSync(entry, 'import "../js-dependency-cache/shared-v1/nested/node_modules/tslib/tslib.es6.js";\n');
+  fs.writeFileSync(nestedEntry, 'import "../../js-dependency-cache/shared-v1/nested/node_modules/tslib/tslib.es6.js";\n');
 
-  const { removeSkyJsDependencyCache } = loadInstallerInternals();
-  assert.equal(removeSkyJsDependencyCache(root), true);
-  assert.equal(fs.existsSync(cache), false);
-  assert.equal(fs.readFileSync(keep, "utf8"), "keep");
-  assert.equal(removeSkyJsDependencyCache(root), false);
+  const { compactSkyJsDependencyCache } = loadInstallerInternals();
+  assert.deepEqual(compactSkyJsDependencyCache(root), {
+    status: "compacted",
+    imports: 2,
+    dependencies: 1,
+  });
+  const compactDependency = path.join(cache, "compact", "d0.js");
+  assert.equal(fs.readFileSync(compactDependency, "utf8"), "export const marker = true;\n");
+  assert.match(fs.readFileSync(entry, "utf8"), /\.\.\/js-dependency-cache\/compact\/d0\.js/);
+  assert.match(fs.readFileSync(nestedEntry, "utf8"), /\.\.\/\.\.\/js-dependency-cache\/compact\/d0\.js/);
+  assert.deepEqual(compactSkyJsDependencyCache(root), {
+    status: "already",
+    imports: 2,
+    dependencies: 1,
+  });
+});
+
+test("fails closed when a Sky cache dependency needs another cache import", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-sky-cache-recursive-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cache = path.join(root, "cua_node", "bin", "node_modules", "@oai", "sky", "dist", "js-dependency-cache");
+  const dependency = path.join(cache, "shared", "dependency.js");
+  const entry = path.join(path.dirname(cache), "project", "entry.js");
+  fs.mkdirSync(path.dirname(dependency), { recursive: true });
+  fs.mkdirSync(path.dirname(entry), { recursive: true });
+  fs.writeFileSync(dependency, 'import "../another.js";\n');
+  fs.writeFileSync(entry, 'import "../js-dependency-cache/shared/dependency.js";\n');
+
+  const { compactSkyJsDependencyCache } = loadInstallerInternals();
+  assert.throws(
+    () => compactSkyJsDependencyCache(root),
+    /recursive compaction/i,
+  );
 });
 
 test("Windows release workflows require delta output with a one-hour bound", () => {

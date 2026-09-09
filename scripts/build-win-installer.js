@@ -30,6 +30,9 @@ const SKY_JS_DEPENDENCY_CACHE = path.join(
   "dist",
   "js-dependency-cache",
 );
+const SKY_COMPACT_DEPENDENCY_DIRECTORY = "compact";
+const SKY_CACHE_IMPORT = /(["'])([^"']*js-dependency-cache[/\\][^"']+)\1/g;
+const SKY_RELATIVE_SPECIFIER = /(["'])(\.\.?[/\\][^"']+)\1/g;
 
 function run(command, args, options = {}) {
   execFileSync(command, args, {
@@ -62,15 +65,101 @@ function clearDirectoryContents(dir) {
   }
 }
 
-function removeSkyJsDependencyCache(resourcesDir) {
-  const dependencyCache = path.join(resourcesDir, SKY_JS_DEPENDENCY_CACHE);
-  if (!fs.existsSync(dependencyCache)) return false;
+function listJavaScriptFiles(directory) {
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...listJavaScriptFiles(entryPath));
+    else if ([".cjs", ".js", ".mjs"].includes(path.extname(entry.name))) files.push(entryPath);
+  }
+  return files;
+}
 
-  // This cache is a build artifact; the production bundle has no imports from
-  // it. Its generated hash directory can exceed NuGet's legacy MAX_PATH limit
-  // once staged by Squirrel.Windows.
+function isInside(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative !== "" && !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative);
+}
+
+function toImportPath(fromFile, toFile) {
+  const relative = path.relative(path.dirname(fromFile), toFile).split(path.sep).join("/");
+  return relative.startsWith(".") ? relative : `./${relative}`;
+}
+
+function compactSkyJsDependencyCache(resourcesDir) {
+  const dependencyCache = path.join(resourcesDir, SKY_JS_DEPENDENCY_CACHE);
+  const skyDist = path.dirname(dependencyCache);
+  if (!fs.existsSync(skyDist)) return { status: "absent", imports: 0, dependencies: 0 };
+
+  const imports = [];
+  for (const file of listJavaScriptFiles(skyDist)) {
+    const source = fs.readFileSync(file, "utf8");
+    for (const match of source.matchAll(SKY_CACHE_IMPORT)) {
+      const specifier = match[2];
+      const target = path.resolve(path.dirname(file), specifier);
+      imports.push({ file, source, specifier, target });
+    }
+  }
+  if (imports.length === 0) {
+    if (!fs.existsSync(dependencyCache)) return { status: "absent", imports: 0, dependencies: 0 };
+    fs.rmSync(dependencyCache, { recursive: true, force: true });
+    return { status: "unused", imports: 0, dependencies: 0 };
+  }
+  if (!fs.existsSync(dependencyCache)) {
+    throw new Error("@oai/sky imports its missing js-dependency-cache");
+  }
+
+  const compactDirectory = path.join(dependencyCache, SKY_COMPACT_DEPENDENCY_DIRECTORY);
+  if (imports.every(({ target }) => isInside(compactDirectory, target))) {
+    if (imports.some(({ target }) => !fs.existsSync(target))) {
+      throw new Error("@oai/sky compact js-dependency-cache is incomplete");
+    }
+    return { status: "already", imports: imports.length, dependencies: new Set(imports.map(({ target }) => target)).size };
+  }
+  if (imports.some(({ target }) => isInside(compactDirectory, target))) {
+    throw new Error("@oai/sky mixes compact and upstream js-dependency-cache imports");
+  }
+
+  const targets = [...new Set(imports.map(({ target }) => target))].sort();
+  for (const target of targets) {
+    if (!isInside(dependencyCache, target) || !fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      throw new Error(`@oai/sky cache import is invalid: ${target}`);
+    }
+    const source = fs.readFileSync(target, "utf8");
+    const nestedTarget = [...source.matchAll(SKY_RELATIVE_SPECIFIER)]
+      .map((match) => path.resolve(path.dirname(target), match[2]))
+      .find((candidate) => isInside(dependencyCache, candidate));
+    SKY_RELATIVE_SPECIFIER.lastIndex = 0;
+    if (nestedTarget) {
+      throw new Error(`@oai/sky cached dependency needs recursive compaction: ${target}`);
+    }
+  }
+
+  const compactFiles = new Map(
+    targets.map((target, index) => [
+      target,
+      path.join(compactDirectory, `d${index}${path.extname(target) || ".js"}`),
+    ]),
+  );
+  const rewritten = new Map();
+  for (const { file, source } of imports) {
+    if (rewritten.has(file)) continue;
+    rewritten.set(
+      file,
+      source.replace(SKY_CACHE_IMPORT, (match, quote, specifier) => {
+        const target = path.resolve(path.dirname(file), specifier);
+        const compactFile = compactFiles.get(target);
+        if (!compactFile) throw new Error(`@oai/sky cache import changed while compacting: ${specifier}`);
+        return `${quote}${toImportPath(file, compactFile)}${quote}`;
+      }),
+    );
+  }
+
+  const contents = new Map(targets.map((target) => [target, fs.readFileSync(target)]));
   fs.rmSync(dependencyCache, { recursive: true, force: true });
-  return true;
+  fs.mkdirSync(compactDirectory, { recursive: true });
+  for (const [target, compactFile] of compactFiles) fs.writeFileSync(compactFile, contents.get(target));
+  for (const [file, source] of rewritten) fs.writeFileSync(file, source, "utf8");
+  return { status: "compacted", imports: imports.length, dependencies: targets.length };
 }
 
 function resetShortWorkspace(root) {
@@ -200,8 +289,12 @@ function applyPatchedResources(appDirectory, primaryExe) {
     );
   }
 
-  if (removeSkyJsDependencyCache(resourcesDir)) {
-    console.log("-- removed @oai/sky build dependency cache from installer staging");
+  const compactedSkyCache = compactSkyJsDependencyCache(resourcesDir);
+  if (compactedSkyCache.status === "compacted") {
+    console.log(
+      `-- compacted @oai/sky dependency cache: ${compactedSkyCache.dependencies} file(s), ` +
+        `${compactedSkyCache.imports} import(s)`,
+    );
   }
 
   const newHash = computeAsarHeaderHash(destAsar);
