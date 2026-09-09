@@ -34,19 +34,27 @@ test("parses and compares official+rN release versions numerically", () => {
     releaseVersion: `${OFFICIAL_VERSION}-r2`,
   });
   assert.equal(formatWindowsReleaseVersion(OFFICIAL_VERSION, 10), `${OFFICIAL_VERSION}-r10`);
-  assert.equal(formatWindowsPackageVersion(OFFICIAL_VERSION, 10), `${OFFICIAL_VERSION}.10`);
+  assert.equal(formatWindowsPackageVersion(OFFICIAL_VERSION, 10), "26.707.72222-rebuild0010");
   assert.equal(parseWindowsReleaseVersion(`${OFFICIAL_VERSION}-r0010`).revision, 10);
   assert.ok(compareWindowsReleaseVersions(`${OFFICIAL_VERSION}-r10`, `${OFFICIAL_VERSION}-r2`) > 0);
   assert.ok(compareWindowsReleaseVersions(`${OFFICIAL_VERSION}-r1`, "26.707.62121") > 0);
   assert.ok(compareNumericVersions(NEXT_MSIX, CURRENT_MSIX) > 0);
 });
 
-test("numeric package revisions are newer in Squirrel's own NuGet comparer", {
+test("Squirrel builds full and delta packages with ordered SemVer revisions", {
   skip: process.platform !== "win32",
-}, () => {
+}, (t) => {
   const { execFileSync } = require("node:child_process");
   const squirrel = path.resolve(__dirname, "../node_modules/electron-winstaller/vendor/Squirrel.exe");
-  const versions = [OFFICIAL_VERSION, formatWindowsPackageVersion(OFFICIAL_VERSION, 1), formatWindowsPackageVersion(OFFICIAL_VERSION, 10)];
+  const versions = [OFFICIAL_VERSION, formatWindowsPackageVersion(OFFICIAL_VERSION, 1), formatWindowsPackageVersion(OFFICIAL_VERSION, 10), "26.707.72222"];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "squirrel-version-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const version of versions) {
+    const nuspec = path.join(root, "Fixture.nuspec");
+    fs.writeFileSync(path.join(root, "payload.txt"), `payload ${version}`);
+    fs.writeFileSync(nuspec, `<package><metadata><id>Fixture</id><version>${version}</version><authors>Test</authors><description>Version regression</description></metadata><files><file src="payload.txt" target="lib/net45/payload.txt" /></files></package>`);
+    execFileSync(path.join(path.dirname(squirrel), "nuget.exe"), ["pack", nuspec, "-OutputDirectory", root, "-NoPackageAnalysis"], { stdio: "pipe" });
+  }
   const command = `
     $ErrorActionPreference = 'Stop'
     $assembly = [Reflection.Assembly]::LoadFrom('${squirrel.replaceAll("'", "''")}')
@@ -59,6 +67,12 @@ test("numeric package revisions are newer in Squirrel's own NuGet comparer", {
     }
   `;
   execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { stdio: "pipe" });
+  const releases = path.join(root, "releases");
+  for (const [index, version] of versions.entries()) {
+    execFileSync(squirrel, ["--releasify", path.join(root, `Fixture.${version}.nupkg`), "--releaseDir", releases, "--no-msi"], { stdio: "pipe", timeout: 60000 });
+    assert.ok(fs.existsSync(path.join(releases, `Fixture-${version}-full.nupkg`)));
+    if (index > 0) assert.ok(fs.existsSync(path.join(releases, `Fixture-${version}-delta.nupkg`)));
+  }
   assert.equal(compareWindowsReleaseVersions(versions[1], `${OFFICIAL_VERSION}-r1`), 0);
 });
 
@@ -192,7 +206,7 @@ test("writes release metadata to packages and tracks Windows versions separately
     internalAppVersion: OFFICIAL_VERSION,
     revision: 1,
     releaseVersion: `${OFFICIAL_VERSION}-r1`,
-    packageVersion: `${OFFICIAL_VERSION}.1`,
+    packageVersion: "26.707.72222-rebuild0001",
   };
 
   updatePackageVersion(packageFile, metadata);
@@ -204,7 +218,7 @@ test("writes release metadata to packages and tracks Windows versions separately
     codexRebuildOfficialVersion: OFFICIAL_VERSION,
     codexRebuildRevision: 1,
     codexRebuildReleaseVersion: `${OFFICIAL_VERSION}-r1`,
-    codexRebuildPackageVersion: `${OFFICIAL_VERSION}.1`,
+    codexRebuildPackageVersion: "26.707.72222-rebuild0001",
     codexRebuildWindowsMsixVersion: NEXT_MSIX,
   });
   assert.deepEqual(JSON.parse(fs.readFileSync(trackedFile)).platforms.Windows, {
@@ -213,7 +227,7 @@ test("writes release metadata to packages and tracks Windows versions separately
     msixVersion: NEXT_MSIX,
     rebuildRevision: 1,
     releaseVersion: `${OFFICIAL_VERSION}-r1`,
-    packageVersion: `${OFFICIAL_VERSION}.1`,
+    packageVersion: "26.707.72222-rebuild0001",
     build: "",
   });
 });
@@ -227,14 +241,14 @@ test("writes explicit GitHub outputs for official, MSIX, revision, and release v
     internalAppVersion: OFFICIAL_VERSION,
     revision: 1,
     releaseVersion: `${OFFICIAL_VERSION}-r1`,
-    packageVersion: `${OFFICIAL_VERSION}.1`,
+    packageVersion: "26.707.72222-rebuild0001",
   }, output);
   const text = fs.readFileSync(output, "utf8");
   assert.match(text, new RegExp(`windows_msix_version=${NEXT_MSIX.replaceAll(".", "\\.")}`));
   assert.match(text, new RegExp(`windows_internal_app_version=${OFFICIAL_VERSION.replaceAll(".", "\\.")}`));
   assert.match(text, /windows_rebuild_revision=1/);
   assert.match(text, new RegExp(`windows_release_version=${OFFICIAL_VERSION.replaceAll(".", "\\.")}-r1`));
-  assert.match(text, new RegExp(`windows_package_version=${OFFICIAL_VERSION.replaceAll(".", "\\.")}.1`));
+  assert.match(text, /windows_package_version=26\.707\.72222-rebuild0001/);
 });
 
 test("CLI reads the extracted Windows internal version before overwriting package metadata", (t) => {

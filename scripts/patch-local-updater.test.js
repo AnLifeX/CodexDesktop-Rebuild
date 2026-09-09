@@ -354,6 +354,9 @@ for (const [currentVersion, releaseVersion] of [
   ["26.707.72221-r0002", "26.707.72221-r0010"],
   ["26.707.72221", "26.707.72221.1"],
   ["26.707.72221.1", "26.707.72221.10"],
+  ["26.707.72221", "26.707.72222-rebuild0001"],
+  ["26.707.72222-rebuild0001", "26.707.72222-rebuild0010"],
+  ["26.707.72222-rebuild0010", "26.707.72222"],
 ]) {
 test(`client updater recognizes ${currentVersion} -> ${releaseVersion}`, async (t) => {
   const fileName = `Codex-${releaseVersion}-full.nupkg`;
@@ -1223,8 +1226,8 @@ test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appen
   const patched = patchWebviewMenuBarCode(source);
 
   assert.match(patched, /function codexRebuildUpdaterTitlebar\(\)/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v8/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v8/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v9/);
+  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v9/);
   const menuRoot = patched.indexOf("children:[(0,Ji.jsx)(`button`,{className:i,children:r}),null");
   const attachment = patched.indexOf("/* CodexRebuildUpdaterTitlebar:descriptor:start */");
   assert.ok(menuRoot >= 0 && attachment > menuRoot, "updater must be attached to the modern menu root");
@@ -1373,15 +1376,15 @@ test("rejects stale or mismatched canonical updater block versions", () => {
   );
 });
 
-test("migrates the v7 updater layers to aggregate delta progress", () => {
-  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 8);
+test("migrates the v8 updater layers to SemVer rebuild support", () => {
+  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 9);
   const current = applyLocalUpdaterPlan(makeCleanLocalUpdaterSources());
   const legacy = {
     packageSource: current.packageSource,
     files: Object.fromEntries(
       Object.entries(current.files).map(([file, source]) => [
         file,
-        source.replaceAll(":v8 */", ":v7 */"),
+        source.replaceAll(":v9 */", ":v8 */"),
       ]),
     ),
   };
@@ -1394,7 +1397,7 @@ test("migrates the v7 updater layers to aggregate delta progress", () => {
   );
   assert.ok(
     Object.values(migrated.files).every(
-      (source) => !source.includes(":v7 */"),
+      (source) => !source.includes(":v8 */"),
     ),
   );
   assert.equal(planLocalUpdaterSources(migrated).status, "already");
