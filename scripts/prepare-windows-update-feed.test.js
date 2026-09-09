@@ -68,8 +68,8 @@ test("publishes the newly generated delta when no previous chain manifest exists
 test("prepares and validates an upgrade from a bare release to a numeric revision", async (t) => {
   const fixture = createFixture(t);
   const base = addPackage(fixture, "26.903.61454", "full", 100);
-  const delta = addPackage(fixture, "26.903.61454.1", "delta", 10);
-  const full = addPackage(fixture, "26.903.61454.1", "full", 100);
+  const delta = addPackage(fixture, "26.903.61455-rebuild0001", "delta", 10);
+  const full = addPackage(fixture, "26.903.61455-rebuild0001", "full", 100);
   writeSourceReleases(fixture, [base, delta, full]);
   const result = prepareWindowsUpdateFeed({ source: fixture.source, dest: fixture.dest });
   assert.deepEqual(result.manifest.deltas.map(({ fromVersion, toVersion }) => [fromVersion, toVersion]),

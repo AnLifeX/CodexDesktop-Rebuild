@@ -25,6 +25,14 @@ function compareNumericVersions(left, right) {
 }
 
 function parseWindowsReleaseVersion(version) {
+  const packageMatch = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)-rebuild(\d{4})$/);
+  if (packageMatch) {
+    const patch = Number(packageMatch[3]) - 1;
+    const revision = Number(packageMatch[4]);
+    if (patch < 0 || revision < 1) throw new Error(`Invalid Windows package version: ${version}`);
+    const officialVersion = `${packageMatch[1]}.${packageMatch[2]}.${patch}`;
+    return { officialVersion, revision, releaseVersion: `${officialVersion}-r${revision}` };
+  }
   const match = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)(?:(?:-r|\.)(\d+))?$/);
   if (!match) {
     throw new Error(
@@ -54,8 +62,10 @@ function formatWindowsPackageVersion(officialVersion, revision) {
   if (!Number.isSafeInteger(value) || value < 1 || value > 9999) {
     throw new Error(`Windows rebuild revision must be between 1 and 9999: ${revision}`);
   }
-  // NuGet orders -rN below the bare release; a fourth numeric part is newer.
-  return `${officialVersion}.${value}`;
+  // The next patch's prerelease sorts after this official release, but before
+  // the next official release. Squirrel rejects fourth numeric components.
+  const [major, minor, patch] = officialVersion.split(".").map(Number);
+  return `${major}.${minor}.${patch + 1}-rebuild${String(value).padStart(4, "0")}`;
 }
 
 function compareWindowsReleaseVersions(left, right) {

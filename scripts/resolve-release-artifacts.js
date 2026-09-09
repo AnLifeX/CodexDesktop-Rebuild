@@ -19,7 +19,7 @@ function walkFiles(root) {
 }
 
 function compareVersionStrings(a, b) {
-  if (/^\d+\.\d+\.\d+(?:(?:-r|\.)\d+)?$/.test(a) && /^\d+\.\d+\.\d+(?:(?:-r|\.)\d+)?$/.test(b)) {
+  if (/^\d+\.\d+\.\d+(?:(?:-rebuild\d{4}|-r\d+|\.\d+))?$/.test(a) && /^\d+\.\d+\.\d+(?:(?:-rebuild\d{4}|-r\d+|\.\d+))?$/.test(b)) {
     return compareWindowsReleaseVersions(a, b);
   }
   const aParts = String(a).split(/[.-]/);

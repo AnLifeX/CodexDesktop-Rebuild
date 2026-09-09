@@ -83,7 +83,7 @@ jobs:
           if ($basePackages[0].Name -eq $targetPackages[0].Name) {
             throw "Base and target packages must have different versions: $($basePackages[0].Name)"
           }
-          if ($targetPackages[0].Name -notmatch "^(?<id>.+)-(?<version>\d+\.\d+\.\d+(?:(?:-r|\.)\d+)?)-full\.nupkg$") {
+          if ($targetPackages[0].Name -notmatch "^(?<id>.+)-(?<version>\d+\.\d+\.\d+(?:(?:-rebuild\d{4}|-r\d+|\.\d+))?)-full\.nupkg$") {
             throw "Cannot derive a raw NuGet input name from $($targetPackages[0].Name)"
           }
           $targetRawName = "$($Matches.id).$($Matches.version).nupkg"
