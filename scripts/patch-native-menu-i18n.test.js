@@ -8,7 +8,7 @@ function loadPatchModule() {
   const filePath = path.join(__dirname, "patch-native-menu-i18n.js");
   const source = fs
     .readFileSync(filePath, "utf8")
-    .replace(/\nmain\(\);\s*$/, "\nmodule.exports = { patchSource };\n");
+    .replace(/\nif \(require\.main === module\) main\(\);\s*/, "\n");
   const sandbox = {
     __dirname,
     console,
@@ -22,10 +22,28 @@ function loadPatchModule() {
 
 const {
   COMMAND_TITLE_TRANSLATIONS,
+  COMPUTER_USE_OVERLAY_TRANSLATIONS,
   NATIVE_MENU_MESSAGE_TRANSLATIONS,
   locateTargets,
+  patchComputerUseOverlayLocaleSource,
   patchSource,
 } = loadPatchModule();
+
+{
+  const source = '{"existing":"保留","computerUseOverlay.escToCancel":"Esc to cancel"}\n';
+  const first = patchComputerUseOverlayLocaleSource(source);
+
+  assert.strictEqual(first.replacements.length, COMPUTER_USE_OVERLAY_TRANSLATIONS.length);
+  const catalog = JSON.parse(first.code);
+  for (const [key, value] of COMPUTER_USE_OVERLAY_TRANSLATIONS) {
+    assert.strictEqual(catalog[key], value);
+  }
+  assert.strictEqual(catalog.existing, "保留");
+
+  const second = patchComputerUseOverlayLocaleSource(first.code);
+  assert.strictEqual(second.code, first.code);
+  assert.strictEqual(second.replacements.length, 0);
+}
 
 {
   const descriptors = NATIVE_MENU_MESSAGE_TRANSLATIONS
