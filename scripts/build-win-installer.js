@@ -279,6 +279,7 @@ function applyPatchedResources(appDirectory, primaryExe) {
   if (!fs.existsSync(sourceCuaNode)) {
     throw new Error(`Patched Windows CUA runtime is missing: ${sourceCuaNode}`);
   }
+  fs.rmSync(destinationCuaNode, { recursive: true, force: true });
   copyRecursive(sourceCuaNode, destinationCuaNode);
 
   for (const fileName of ["codex.exe", "rg.exe"]) {

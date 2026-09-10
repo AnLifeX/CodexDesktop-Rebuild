@@ -33,6 +33,10 @@ assert.match(
   /copyRecursive\(sourceCuaNode, destinationCuaNode\)/,
   "packaged Windows resources must include the patched CUA runtime",
 );
+assert.ok(
+  source.indexOf("fs.rmSync(destinationCuaNode") < source.indexOf("copyRecursive(sourceCuaNode, destinationCuaNode)"),
+  "packaged Windows resources must replace the upstream CUA runtime before decoding paths",
+);
 
 function loadInstallerInternals() {
   const filename = path.join(__dirname, "build-win-installer.js");
