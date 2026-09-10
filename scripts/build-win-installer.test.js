@@ -28,6 +28,11 @@ assert.match(
   /packageJson\.codexRebuildPackageVersion \|\| packageJson\.version/,
   "Squirrel must prefer the zero-padded internal package version over the public rN version",
 );
+assert.match(
+  source,
+  /copyRecursive\(sourceCuaNode, destinationCuaNode\)/,
+  "packaged Windows resources must include the patched CUA runtime",
+);
 
 function loadInstallerInternals() {
   const filename = path.join(__dirname, "build-win-installer.js");
