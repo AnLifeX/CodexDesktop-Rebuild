@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Post-build patch: localize hard-coded Electron native menu labels.
+ * Post-build patch: localize Electron native-menu labels and Computer Use overlay text.
  *
  * The renderer/webview locale bundle can translate menu bar captions such as
  * File/Edit/View/Help, but several native menu labels and command menu titles
@@ -62,6 +62,10 @@ const TRAY_MESSAGE_TRANSLATIONS = [
   ["trayMenu.more", "More", "更多"],
   ["trayMenu.projectlessThreads", "Tasks", "任务"],
   ["trayMenu.projectlessThreads", "Chats", "聊天"],
+];
+const COMPUTER_USE_OVERLAY_TRANSLATIONS = [
+  ["computerUseOverlay.usingComputer", "ChatGPT 正在使用你的电脑"],
+  ["computerUseOverlay.escToCancel", "按 Esc 键取消"],
 ];
 
 const MENU_LABEL_TRANSLATIONS = [
@@ -448,6 +452,63 @@ function patchSource(source) {
   return { code, replacements };
 }
 
+function patchComputerUseOverlayLocaleSource(source) {
+  let catalog;
+  try {
+    catalog = JSON.parse(source);
+  } catch (error) {
+    throw new Error(`Computer Use locale is invalid JSON: ${error.message}`);
+  }
+  if (catalog == null || Array.isArray(catalog) || typeof catalog !== "object") {
+    throw new Error("Computer Use locale must be a JSON object");
+  }
+
+  let code = source;
+  const replacements = [];
+  for (const [key, value] of COMPUTER_USE_OVERLAY_TRANSLATIONS) {
+    if (catalog[key] === value) continue;
+    const keyLiteral = JSON.stringify(key);
+    const valuePattern = new RegExp(
+      `(${escapeRegex(keyLiteral)}\\s*:\\s*)"(?:\\\\.|[^"\\\\])*"`,
+    );
+    if (Object.hasOwn(catalog, key)) {
+      if (!valuePattern.test(code)) {
+        throw new Error(`Computer Use locale key could not be updated: ${key}`);
+      }
+      code = code.replace(valuePattern, `$1${JSON.stringify(value)}`);
+    } else {
+      const end = code.lastIndexOf("}");
+      if (end === -1) throw new Error("Computer Use locale has no closing object");
+      const before = code.slice(0, end);
+      code = `${before}${before.trimEnd().endsWith("{") ? "" : ","}${JSON.stringify(key)}:${JSON.stringify(value)}${code.slice(end)}`;
+    }
+    catalog[key] = value;
+    replacements.push({ key, value });
+  }
+
+  const verified = JSON.parse(code);
+  for (const [key, value] of COMPUTER_USE_OVERLAY_TRANSLATIONS) {
+    if (verified[key] !== value) {
+      throw new Error(`Computer Use locale verification failed: ${key}`);
+    }
+  }
+  return { code, replacements };
+}
+
+function locateComputerUseOverlayLocales(platform) {
+  if (platform && platform !== "win") return [];
+  const localePath = path.join(
+    __dirname,
+    "..",
+    "src",
+    "win",
+    "_asar",
+    "native-menu-locales",
+    "zh-CN.json",
+  );
+  return fs.existsSync(localePath) ? [{ platform: "win", path: localePath }] : [];
+}
+
 function locateTargets(platform) {
   const platforms = platform === "unix" ? ["mac-arm64", "mac-x64"] : platform ? [platform] : null;
   const specs = [{
@@ -579,6 +640,24 @@ function main() {
     }
   }
 
+  for (const target of locateComputerUseOverlayLocales(platform)) {
+    const source = fs.readFileSync(target.path, "utf8");
+    const { code, replacements } = patchComputerUseOverlayLocaleSource(source);
+    total += replacements.length;
+    console.log(`\n-- [${target.platform}] ${relPath(target.path)}`);
+    if (replacements.length === 0) {
+      console.log("   [ok] Computer Use overlay text already localized");
+      continue;
+    }
+    for (const { key, value } of replacements) {
+      console.log(`   * ${key} -> ${value}`);
+    }
+    if (!isCheck) {
+      fs.writeFileSync(target.path, code, "utf8");
+      console.log(`   [ok] Computer Use overlay localized: ${replacements.length} replacements`);
+    }
+  }
+
   if (isCheck) {
     console.log(`\n=> Total patchable replacements: ${total}`);
   }
@@ -589,6 +668,9 @@ if (require.main === module) main();
 module.exports = {
   COMMAND_TITLE_TRANSLATIONS,
   NATIVE_MENU_MESSAGE_TRANSLATIONS,
+  COMPUTER_USE_OVERLAY_TRANSLATIONS,
   patchSource,
+  patchComputerUseOverlayLocaleSource,
+  locateComputerUseOverlayLocales,
   locateTargets,
 };
