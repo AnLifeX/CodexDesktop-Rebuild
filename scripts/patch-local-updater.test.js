@@ -236,7 +236,8 @@ function snapshotLocalUpdaterTargets(asarRoot, relativePaths) {
     ),
   );
   assert.ok(bootstrap.includes("let selectReleasePlan=(items,manifestText,current)=>"));
-  assert.ok(bootstrap.includes("manifest.deltas.length>5"));
+  assert.ok(!bootstrap.includes("manifest.deltas.length>5"));
+  assert.ok(!bootstrap.includes("chain.length>=5"));
   assert.ok(bootstrap.includes("total>=full.size"));
   assert.ok(bootstrap.includes("candidate=>candidate.kind==='full'"));
   assert.ok(bootstrap.includes("autoUpdater.setFeedURL({url:feedUrl})"));
@@ -471,6 +472,27 @@ test("query phase selects only a complete and cheaper delta path", async (t) => 
     Array.from(complete.updateFiles, (item) => item.fileName),
     [delta2.fileName, delta3.fileName, full.fileName],
   );
+
+  const longFull = { ...full, fileName: "Codex-7.0.0-full.nupkg", version: "7.0.0" };
+  const longDeltas = Array.from({ length: 6 }, (_, index) => ({
+    fileName: `Codex-${index + 2}.0.0-delta.nupkg`,
+    sha1: String.fromCharCode(97 + index).repeat(40),
+    size: 10,
+    version: `${index + 2}.0.0`,
+  }));
+  const longChain = await runUpdaterCheck(t, {
+    currentVersion: "1.0.0",
+    releaseLines: [...longDeltas, longFull].map((item) => item.sha1 + " " + item.fileName + " " + item.size),
+    manifest: {
+      schemaVersion: 1,
+      latestVersion: longFull.version,
+      full: longFull,
+      deltas: longDeltas.map((item, index) => edge(`${index + 1}.0.0`, item)),
+    },
+  });
+  assert.equal(longChain.updateMode, "delta-chain");
+  assert.equal(longChain.updatePackageCount, 6);
+  assert.equal(longChain.updateSize, 60);
 
   const outsideWindow = await runUpdaterCheck(t, {
     currentVersion: "0.5.0",

@@ -3,11 +3,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { compareWindowsReleaseVersions } = require("./configure-windows-release-version");
-const {
-  DEFAULT_MAX_DELTAS,
-  DELTA_CHAIN_FILE,
-  DELTA_CHAIN_SCHEMA_VERSION,
-} = require("./prepare-windows-update-feed");
+const { DELTA_CHAIN_FILE, DELTA_CHAIN_SCHEMA_VERSION } = require("./prepare-windows-update-feed");
 
 function parseArgs(argv) {
   const options = {};
@@ -35,11 +31,7 @@ function parseDeclaredPackages(releasesPath, version) {
   const lines = fs.readFileSync(releasesPath, "utf8")
     .split(/\r?\n/)
     .filter((line) => line.trim().length > 0);
-  if (lines.length < 1 || lines.length > DEFAULT_MAX_DELTAS + 1) {
-    throw new Error(
-      `RELEASES must contain one full and at most ${DEFAULT_MAX_DELTAS} delta lines, found ${lines.length}`,
-    );
-  }
+  if (lines.length < 1) throw new Error("RELEASES must contain at least one full package line");
 
   const packages = new Map();
   let full = null;
@@ -96,10 +88,6 @@ function readAndValidateManifest(root, version, declarations) {
   ) {
     throw new Error(`${DELTA_CHAIN_FILE} has invalid schema or latest version`);
   }
-  if (manifest.deltas.length > DEFAULT_MAX_DELTAS) {
-    throw new Error(`${DELTA_CHAIN_FILE} contains more than ${DEFAULT_MAX_DELTAS} deltas`);
-  }
-
   const full = declarations.full;
   for (const field of ["fileName", "sha1", "size"]) {
     if (manifest.full[field] !== full[field]) {

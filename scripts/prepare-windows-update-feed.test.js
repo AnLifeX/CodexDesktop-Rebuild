@@ -137,7 +137,7 @@ test("same-version rebuild prefers newly generated packages over downloaded hist
   );
 });
 
-test("caps the retained delta chain at five packages", (t) => {
+test("retains every contiguous delta when the whole chain is smaller than full", (t) => {
   const fixture = createFixture(t);
   const entries = [];
   const edges = [];
@@ -160,12 +160,12 @@ test("caps the retained delta chain at five packages", (t) => {
   const previousManifest = writePreviousManifest(fixture, "6.0.0", edges);
 
   const result = prepareWindowsUpdateFeed({ source: fixture.source, dest: fixture.dest, previousManifest });
-  assert.equal(result.manifest.deltas.length, 5);
-  assert.equal(result.manifest.deltas[0].fromVersion, "2.0.0");
+  assert.equal(result.manifest.deltas.length, 6);
+  assert.equal(result.manifest.deltas[0].fromVersion, "1.0.0");
   assert.equal(result.manifest.deltas.at(-1).toVersion, "7.0.0");
 });
 
-test("drops older deltas until the retained suffix is smaller than full", (t) => {
+test("drops the entire delta chain when its total is not smaller than full", (t) => {
   const fixture = createFixture(t);
   const full1 = addPackage(fixture, "1.0.0", "full", 100);
   const delta2 = addPackage(fixture, "2.0.0", "delta", 60);
@@ -181,6 +181,6 @@ test("drops older deltas until the retained suffix is smaller than full", (t) =>
   }]);
 
   const result = prepareWindowsUpdateFeed({ source: fixture.source, dest: fixture.dest, previousManifest });
-  assert.deepEqual(result.manifest.deltas.map((edge) => edge.fileName), [delta3.filename]);
-  assert.equal(result.manifest.deltas[0].fromVersion, "2.0.0");
+  assert.deepEqual(result.manifest.deltas, []);
+  assert.deepEqual(fs.readdirSync(fixture.dest).sort(), [DELTA_CHAIN_FILE, "RELEASES", full3.filename].sort());
 });

@@ -2,9 +2,8 @@
 /**
  * Prepare a compact Squirrel.Windows update feed.
  *
- * The feed keeps the newest full package plus a contiguous suffix of delta
- * packages. The suffix is capped by both count and total bytes so a client
- * never downloads a delta chain that is larger than the latest full package.
+ * The feed keeps the newest full package plus a complete contiguous delta
+ * chain only when the whole chain is smaller than that full package.
  */
 const fs = require("fs");
 const path = require("path");
@@ -12,13 +11,11 @@ const { compareWindowsReleaseVersions } = require("./configure-windows-release-v
 
 const DELTA_CHAIN_FILE = "delta-chain.json";
 const DELTA_CHAIN_SCHEMA_VERSION = 1;
-const DEFAULT_MAX_DELTAS = 5;
-
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (["--source", "--dest", "--previous-manifest", "--max-deltas"].includes(arg)) {
+    if (["--source", "--dest", "--previous-manifest"].includes(arg)) {
       args[arg.slice(2)] = argv[++i];
     } else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -27,14 +24,8 @@ function parseArgs(argv) {
   if (!args.source || !args.dest) {
     throw new Error(
       "Usage: prepare-windows-update-feed.js --source <dir> --dest <dir> " +
-        "[--previous-manifest <file>] [--max-deltas <count>]",
-    );
-  }
-  const maxDeltas = args["max-deltas"] == null
-    ? DEFAULT_MAX_DELTAS
-    : Number(args["max-deltas"]);
-  if (!Number.isSafeInteger(maxDeltas) || maxDeltas < 0 || maxDeltas > DEFAULT_MAX_DELTAS) {
-    throw new Error(`--max-deltas must be an integer from 0 to ${DEFAULT_MAX_DELTAS}`);
+        "[--previous-manifest <file>]",
+      );
   }
   return {
     source: path.resolve(args.source),
@@ -42,7 +33,6 @@ function parseArgs(argv) {
     previousManifest: args["previous-manifest"]
       ? path.resolve(args["previous-manifest"])
       : null,
-    maxDeltas,
   };
 }
 
@@ -91,7 +81,7 @@ function readPreviousManifest(filePath) {
   return manifest;
 }
 
-function selectDeltaChain({ entries, packageFiles, latestFull, previousManifest, maxDeltas }) {
+function selectDeltaChain({ entries, packageFiles, latestFull, previousManifest }) {
   const deltasByVersion = new Map(
     entries
       .filter((entry) => entry.kind === "delta" && packageFiles.has(entry.filename))
@@ -143,10 +133,9 @@ function selectDeltaChain({ entries, packageFiles, latestFull, previousManifest,
   const selected = [];
   let cursor = latestFull.version;
   let totalBytes = 0;
-  while (selected.length < maxDeltas) {
+  while (true) {
     const edge = edgesByTarget.get(cursor);
     if (!edge) break;
-    if (totalBytes + edge.entry.size >= latestFull.size) break;
     selected.unshift({
       fileName: edge.entry.filename,
       fromVersion: edge.fromVersion,
@@ -157,14 +146,15 @@ function selectDeltaChain({ entries, packageFiles, latestFull, previousManifest,
     totalBytes += edge.entry.size;
     cursor = edge.fromVersion;
   }
-  return { deltas: selected, totalBytes };
+  return totalBytes < latestFull.size
+    ? { deltas: selected, totalBytes }
+    : { deltas: [], totalBytes: 0 };
 }
 
 function prepareWindowsUpdateFeed({
   source,
   dest,
   previousManifest: previousManifestPath = null,
-  maxDeltas = DEFAULT_MAX_DELTAS,
 }) {
   if (!fs.existsSync(source)) throw new Error(`Source directory does not exist: ${source}`);
 
@@ -195,7 +185,6 @@ function prepareWindowsUpdateFeed({
     packageFiles,
     latestFull,
     previousManifest,
-    maxDeltas,
   });
   const selectedEntries = [
     ...chain.deltas.map((delta) => entriesByFilename.get(delta.fileName)),
@@ -250,7 +239,6 @@ function main() {
 }
 
 module.exports = {
-  DEFAULT_MAX_DELTAS,
   DELTA_CHAIN_FILE,
   DELTA_CHAIN_SCHEMA_VERSION,
   parseReleaseLine,
