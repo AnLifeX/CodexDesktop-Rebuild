@@ -8,6 +8,7 @@ const { pathToFileURL } = require("node:url");
 const { ASSET, installWindowsCuaBindings, patchGlobalsSource } = require("./patch-windows-cua-bindings");
 
 const GLOBALS = 'import{cua as r}from"../cua.js";import{create_tinysky_alt as t}from"./create_tinysky_alt.js";null!==r.browsers&&null!==r.computer||await r.initialize();const{browsers:i,computer:l}=r;if(null===i||null===l)throw new Error("tinyskyAlt failed to initialize");Reflect.set(globalThis,"cua",t({browsers:i,computer:l}));';
+const SETUP_GLOBALS = 'import{__awaiter as t}from"../../../../../node_modules/tslib.js";import{create_tinysky_alt as e}from"./create_tinysky_alt.js";let i;const l={initialize(){return t(this,void 0,void 0,function*(){return yield n(),l.getState()})}};function n(t={}){return null!=i||(i=e(t).then(t=>{Object.assign(l,t)})),i}Reflect.set(globalThis,"cua",l);export{n as setupCUA};';
 
 test("installs Windows bindings into the CUA runtime idempotently", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-windows-cua-"));
@@ -20,7 +21,13 @@ test("installs Windows bindings into the CUA runtime idempotently", (t) => {
   assert.ok(fs.existsSync(first.bindings));
   assert.match(fs.readFileSync(globals, "utf8"), /installWindowsAppBindings/);
   assert.equal(installWindowsCuaBindings(root).changed, false);
-  assert.throws(() => patchGlobalsSource("export {};"), /anchor changed/);
+  assert.throws(() => patchGlobalsSource("export {};"), /import changed/);
+});
+
+test("installs after current deferred CUA setup", () => {
+  const patched = patchGlobalsSource(SETUP_GLOBALS);
+  assert.match(patched, /installWindowsAppBindings/);
+  assert.match(patched, /Object\.assign\(l,t\);return o\(l\)/);
 });
 
 test("standard patch pipeline installs Windows CUA bindings after the screenshot fallback", () => {
