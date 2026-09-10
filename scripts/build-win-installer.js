@@ -274,6 +274,13 @@ function applyPatchedResources(appDirectory, primaryExe) {
   fs.rmSync(destUnpacked, { recursive: true, force: true });
   copyRecursive(sourceUnpacked, destUnpacked);
 
+  const sourceCuaNode = path.join(sourceWinDir, "cua_node");
+  const destinationCuaNode = path.join(resourcesDir, "cua_node");
+  if (!fs.existsSync(sourceCuaNode)) {
+    throw new Error(`Patched Windows CUA runtime is missing: ${sourceCuaNode}`);
+  }
+  copyRecursive(sourceCuaNode, destinationCuaNode);
+
   for (const fileName of ["codex.exe", "rg.exe"]) {
     const sourceFile = path.join(sourceWinDir, fileName);
     if (fs.existsSync(sourceFile)) {
@@ -300,7 +307,7 @@ function applyPatchedResources(appDirectory, primaryExe) {
   const newHash = computeAsarHeaderHash(destAsar);
   if (oldHash !== newHash) patchExeHash(exePath, oldHash, newHash);
 
-  console.log("   [ok] patched upstream app resources");
+  console.log("   [ok] patched upstream app resources and CUA runtime");
 }
 
 function escapeRegExp(value) {
