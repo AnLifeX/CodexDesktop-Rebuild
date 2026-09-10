@@ -34,8 +34,8 @@ function writeFeed(feed, full, deltas, overrides = {}) {
     path.join(feed.root, "delta-chain.json"),
     `${JSON.stringify({
       schemaVersion: 1,
-      latestVersion: VERSION,
-      full: { fileName: full.fileName, sha1: full.sha1, size: full.size, version: VERSION },
+      latestVersion: full.version,
+      full: { fileName: full.fileName, sha1: full.sha1, size: full.size, version: full.version },
       deltas,
       ...overrides,
     }, null, 2)}\n`,
@@ -67,6 +67,18 @@ test("accepts latest full with a contiguous, smaller delta chain", async (t) => 
     ],
     deltaBytes: delta2.size + delta3.size,
   });
+});
+
+test("accepts more than five deltas when their total is smaller than full", async (t) => {
+  const feed = createFeed(t);
+  const deltas = Array.from({ length: 6 }, (_, index) =>
+    addPackage(feed, `${index + 2}.0.0`, "delta", 10),
+  );
+  const full = addPackage(feed, "7.0.0", "full", 100);
+  writeFeed(feed, full, deltas.map((item, index) => edge(`${index + 1}.0.0`, item)));
+  const result = await validateWindowsReleaseFeed({ root: feed.root, version: full.version });
+  assert.equal(result.deltas.length, 6);
+  assert.equal(result.deltaBytes, 60);
 });
 
 test("accepts a full-only feed", async (t) => {

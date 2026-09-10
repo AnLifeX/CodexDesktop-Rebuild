@@ -321,7 +321,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     let fullPlan={version:full.version,fileName:full.fileName,size:full.size,sha1:full.sha1,files:[full],mode:'full',packageCount:1};
     let manifest;
     try{manifest=JSON.parse(String(manifestText||''))}catch{return fullPlan}
-    if(manifest?.schemaVersion!==1||manifest.latestVersion!==full.version||!Array.isArray(manifest.deltas)||manifest.deltas.length>5)return fullPlan;
+    if(manifest?.schemaVersion!==1||manifest.latestVersion!==full.version||!Array.isArray(manifest.deltas))return fullPlan;
     if(manifest.full?.fileName!==full.fileName||manifest.full?.sha1!==full.sha1||manifest.full?.size!==full.size||manifest.full?.version!==full.version)return fullPlan;
     let edges=[];
     for(let edge of manifest.deltas){
@@ -330,7 +330,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
     }
     let cursor=current,chain=[],total=0,seen=new Set;
     while(compareVersions(cursor,full.version)<0){
-      if(chain.length>=5||seen.has(cursor))return fullPlan;
+      if(seen.has(cursor))return fullPlan;
       seen.add(cursor);
       let edge=edges.find(candidate=>compareVersions(candidate.fromVersion,cursor)===0);
       if(!edge||compareVersions(edge.toVersion,cursor)<=0||compareVersions(edge.toVersion,full.version)>0)return fullPlan;
