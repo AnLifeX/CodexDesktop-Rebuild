@@ -119,8 +119,8 @@ export async function installWindowsAppBindings(cua) {
   cua.getApp = async (target) => {
     let apps = await computer.list_apps();
     let app = matchingApp(apps, target);
-    if (!app) {
-      await computer.launch_app({ app: target });
+    if (!app || app.windows?.length === 0) {
+      await computer.launch_app({ app: app?.id || target });
       apps = await computer.list_apps();
       app = matchingApp(apps, target);
     }

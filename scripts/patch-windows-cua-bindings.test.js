@@ -68,3 +68,31 @@ test("Windows CUA binding lists, captures, and targets one returned app window",
   assert.deepEqual(calls.at(-1), ["scroll", { window: { app: "demo.exe", id: 7, title: "Demo" }, x: 5, y: 6, scrollX: 0, scrollY: 1200 }]);
   assert.ok(writes.includes("[1] button"));
 });
+
+test("Windows CUA binding launches a returned app with no window", async (t) => {
+  const previousCua = globalThis.cua;
+  const previousRepl = globalThis.nodeRepl;
+  t.after(() => { globalThis.cua = previousCua; globalThis.nodeRepl = previousRepl; });
+  const calls = [];
+  let running = false;
+  globalThis.nodeRepl = { write: () => {}, emitImage: () => {} };
+  globalThis.cua = { computer: {
+    target: "windows",
+    async list_apps() {
+      return [{
+        id: "demo",
+        displayName: "Demo",
+        windows: running ? [{ app: "demo.exe", id: 7, title: "Demo" }] : [],
+      }];
+    },
+    async launch_app(input) { calls.push(["launch_app", input]); running = true; },
+    async get_window(input) { return { ...input, title: "Demo" }; },
+    async get_window_state(input) {
+      return { window: input.window, accessibility: { tree: "[1] button" }, screenshots: [{ url: "data:image/png;base64,AA==" }] };
+    },
+  } };
+  const { installWindowsAppBindings } = await import(`${pathToFileURL(ASSET).href}?test=${Date.now()}`);
+  await installWindowsAppBindings(globalThis.cua);
+  await globalThis.cua.getApp("Demo");
+  assert.deepEqual(calls, [["launch_app", { app: "demo" }]]);
+});
