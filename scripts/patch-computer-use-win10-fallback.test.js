@@ -135,6 +135,35 @@ test("legacy fallback returns screenshots and removes synthetic screenshot IDs",
   ]);
 });
 
+test("legacy fallback refreshes a stale window before retrying capture", async () => {
+  const moduleUrl = `${pathToFileURL(FALLBACK_MODULE_SOURCE).href}?test=${Date.now()}`;
+  const fallback = await import(moduleUrl);
+  const staleWindow = { app: "fixture.exe", id: 123, title: "fixture" };
+  const freshWindow = { app: "fixture.exe", id: 456, title: "fixture" };
+  const capturedIds = [];
+  const client = {
+    async list_windows() { return [freshWindow]; },
+    async get_window(input) { return input; },
+    async get_window_state() { throw new Error("native screenshot must not run on legacy Windows"); },
+    async click() {},
+    async scroll() {},
+    async drag() {},
+  };
+  fallback.installWindowsLegacyScreenshotFallback(client, {
+    releaseValue: "10.0.19045",
+    async captureWindow(window) {
+      capturedIds.push(window.id);
+      if (window.id === staleWindow.id) throw new Error("Window handle is no longer valid");
+      return { url: "data:image/png;base64,AA==", width: 800, height: 600 };
+    },
+    async emitImage() {},
+  });
+
+  const state = await client.get_window_state({ window: staleWindow });
+  assert.deepEqual(capturedIds, [staleWindow.id, freshWindow.id]);
+  assert.deepEqual(state.window, freshWindow);
+});
+
 test("standard patch pipeline includes the screenshot fallback", () => {
   const patchAll = fs.readFileSync(path.join(__dirname, "patch-all.js"), "utf8");
   assert.match(patchAll, /"patch-computer-use-win10-fallback\.js"/);
