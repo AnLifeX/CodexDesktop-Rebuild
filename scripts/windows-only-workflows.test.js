@@ -95,6 +95,7 @@ test("Windows builds match and record the Codex CLI bundled by the official MSIX
 
 test("Windows releases use generated final-form notes with source run markers", () => {
   for (const { name, text } of workflows) {
+    assert.match(text, /actions\/checkout@v6\n\s+with:\n\s+fetch-depth: 0/);
     assert.match(text, /body_path: out\/windows-release-notes\.md/);
     assert.match(text, /--source-run-id "\$\{\{ github\.run_id \}\}"/);
     assert.match(text, /<!-- codex-rebuild-run-id:\$\{\{ github\.run_id \}\} -->/);

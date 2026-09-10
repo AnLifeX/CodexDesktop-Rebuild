@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  readBuildChanges,
   renderReleaseNotes,
   selectOfficialUpdates,
   versionFamily,
@@ -66,12 +67,36 @@ test("rendered notes contain trustworthy metadata, downloads, and the hidden run
       kind: "recent",
       items: [item({ date: "2026-08-25", title: "Browser update" })],
     },
+    buildChanges: {
+      previousTag: "codex-win-26.825.41651",
+      changes: ["fix(windows): restore native app controls"],
+    },
   });
 
   assert.match(notes, /## 版本信息/);
   assert.match(notes, /OpenAI 没有为此内部构建号提供一一对应的更新说明/);
   assert.match(notes, /## AnLifeX 构建更新/);
+  assert.match(notes, /### 本次变更/);
+  assert.match(notes, /自上个 Windows 发布标签 `codex-win-26\.825\.41651` 以来/);
+  assert.match(notes, /fix\(windows\): restore native app controls/);
   assert.match(notes, /多版本残差链/);
   assert.match(notes, /<!-- codex-rebuild-run-id:123456 -->/);
   assert.doesNotMatch(notes, /remains a draft|仍是草稿/i);
+});
+
+test("collects local changes from the most recent merged Windows release tag", () => {
+  const calls = [];
+  const result = readBuildChanges((command, args) => {
+    calls.push([command, args]);
+    return args[0] === "tag"
+      ? "codex-win-26.825.41651\ncodex-win-26.801.10000\n"
+      : "fix(windows): restore native app controls\n";
+  });
+  assert.deepEqual(result, {
+    previousTag: "codex-win-26.825.41651",
+    changes: ["fix(windows): restore native app controls"],
+  });
+  assert.deepEqual(calls[1], ["git", [
+    "log", "--no-merges", "--format=%s", "codex-win-26.825.41651..HEAD",
+  ]]);
 });

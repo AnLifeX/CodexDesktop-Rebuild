@@ -64,6 +64,8 @@ jobs:
       windows_feed_staging_tag: windows-update-feed-staging-${{ steps.windows_artifacts.outputs.windows_installer_version }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Validate replacement inputs
         shell: pwsh
         env:

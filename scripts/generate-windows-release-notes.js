@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 
 const OFFICIAL_CHANGELOG_URL = "https://developers.openai.com/codex/changelog";
 const OFFICIAL_CHANGELOG_FEED = "https://learn.chatgpt.com/docs/changelog/codex-app.json";
@@ -86,6 +87,23 @@ function renderOfficialItem(item) {
   return `- \`${item.date}\` [${title}](${url})${summary ? ` — ${summary}` : ""}`;
 }
 
+function readBuildChanges(execute = execFileSync) {
+  try {
+    const tags = String(execute("git", [
+      "tag", "--merged", "HEAD", "--list", "codex-win-*", "--sort=-creatordate",
+    ], { encoding: "utf8" })).trim().split(/\r?\n/).filter(Boolean);
+    const previousTag = tags[0] || "";
+    if (!previousTag) return { previousTag, changes: [] };
+    const changes = String(execute("git", [
+      "log", "--no-merges", "--format=%s", `${previousTag}..HEAD`,
+    ], { encoding: "utf8" })).split(/\r?\n/).map(singleLine).filter(Boolean);
+    return { previousTag, changes };
+  } catch (error) {
+    console.warn(`Unable to include AnLifeX build changes: ${error.message}`);
+    return { previousTag: "", changes: [] };
+  }
+}
+
 function renderReleaseNotes(options) {
   const {
     appVersion,
@@ -96,6 +114,7 @@ function renderReleaseNotes(options) {
     installerName,
     sourceRunId,
     officialUpdates = { kind: "none", items: [] },
+    buildChanges = { previousTag: "", changes: [] },
   } = options;
 
   const lines = [
@@ -128,6 +147,24 @@ function renderReleaseNotes(options) {
     `- [查看 OpenAI Codex 完整更新日志](${OFFICIAL_CHANGELOG_URL})`,
     "",
     "## AnLifeX 构建更新",
+    "",
+    "### 本次变更",
+    "",
+  );
+
+  if (buildChanges.changes.length > 0) {
+    lines.push(
+      `自上个 Windows 发布标签 \`${buildChanges.previousTag}\` 以来：`,
+      "",
+      ...buildChanges.changes.map((change) => `- ${markdownLinkText(change)}`),
+    );
+  } else {
+    lines.push("- 暂无额外的 AnLifeX 代码变更。");
+  }
+
+  lines.push(
+    "",
+    "### 构建说明",
     "",
     `- 同步官方 Windows x64 Codex App \`${appVersion}\`。`,
     `- 内置与官方包匹配的 Codex CLI \`${cliVersion}\`。`,
@@ -188,7 +225,7 @@ async function main() {
   }
 
   fs.mkdirSync(path.dirname(writePath), { recursive: true });
-  fs.writeFileSync(writePath, renderReleaseNotes({ ...options, officialUpdates }), "utf8");
+  fs.writeFileSync(writePath, renderReleaseNotes({ ...options, officialUpdates, buildChanges: readBuildChanges() }), "utf8");
   console.log(`Wrote Windows release notes to ${writePath}`);
 }
 
@@ -202,6 +239,7 @@ if (require.main === module) {
 module.exports = {
   OFFICIAL_CHANGELOG_URL,
   declaredVersionFamilies,
+  readBuildChanges,
   renderReleaseNotes,
   selectOfficialUpdates,
   versionFamily,
