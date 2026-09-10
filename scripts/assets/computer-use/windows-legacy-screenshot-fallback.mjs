@@ -11,6 +11,7 @@ const CAPTURE_HELPER_PATH = fileURLToPath(
 );
 const NATIVE_CAPTURE_FAILURE =
   /FrameArrived timed out|window capture timed out|no screenshot targets found|SetIsBorderRequired failed/i;
+const STALE_WINDOW_FAILURE = /Window handle is no longer valid/i;
 let nextScreenshotId = 1;
 
 export function getWindowsBuildNumber(releaseValue = release()) {
@@ -149,6 +150,7 @@ async function getFallbackWindowState({
   const includeText = input?.include_text === true;
   let accessibility = null;
   let window;
+  let capture;
 
   if (includeText) {
     const textState = await nativeGetWindowState({
@@ -162,7 +164,11 @@ async function getFallbackWindowState({
     window = await client.get_window(input?.window);
   }
 
-  const capture = await captureWindow(window);
+  ({ window, capture } = await captureWithFreshWindow({
+    captureWindow,
+    client,
+    window,
+  }));
   const screenshot = {
     id: `${FALLBACK_SCREENSHOT_ID_PREFIX}${Date.now()}-${nextScreenshotId++}`,
     zIndex: 0,
@@ -174,6 +180,30 @@ async function getFallbackWindowState({
   assignFiniteNumber(screenshot, "height", capture.height);
   await emitImage(screenshot.url);
   return { accessibility, screenshots: [screenshot], window };
+}
+
+async function captureWithFreshWindow({ captureWindow, client, window }) {
+  try {
+    return { window, capture: await captureWindow(window) };
+  } catch (error) {
+    if (!STALE_WINDOW_FAILURE.test(formatErrorMessage(error))) throw error;
+    const refreshedWindow = await refreshWindow(client, window);
+    if (!refreshedWindow) throw error;
+    return { window: refreshedWindow, capture: await captureWindow(refreshedWindow) };
+  }
+}
+
+async function refreshWindow(client, previousWindow) {
+  try {
+    const candidates = (await client.list_windows()).filter(
+      (candidate) =>
+        candidate.app === previousWindow?.app &&
+        (previousWindow.title == null || candidate.title === previousWindow.title),
+    );
+    return candidates.length === 1 ? await client.get_window(candidates[0]) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function emitComputerUseImage(url) {
