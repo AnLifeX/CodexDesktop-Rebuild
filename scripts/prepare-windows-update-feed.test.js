@@ -165,7 +165,7 @@ test("retains every contiguous delta when the whole chain is smaller than full",
   assert.equal(result.manifest.deltas.at(-1).toVersion, "7.0.0");
 });
 
-test("drops the entire delta chain when its total is not smaller than full", (t) => {
+test("keeps the newest delta suffix whose cumulative size is smaller than full", (t) => {
   const fixture = createFixture(t);
   const full1 = addPackage(fixture, "1.0.0", "full", 100);
   const delta2 = addPackage(fixture, "2.0.0", "delta", 60);
@@ -181,6 +181,6 @@ test("drops the entire delta chain when its total is not smaller than full", (t)
   }]);
 
   const result = prepareWindowsUpdateFeed({ source: fixture.source, dest: fixture.dest, previousManifest });
-  assert.deepEqual(result.manifest.deltas, []);
-  assert.deepEqual(fs.readdirSync(fixture.dest).sort(), [DELTA_CHAIN_FILE, "RELEASES", full3.filename].sort());
+  assert.deepEqual(result.manifest.deltas.map((edge) => edge.fileName), [delta3.filename]);
+  assert.equal(result.manifest.deltas[0].fromVersion, "2.0.0");
 });

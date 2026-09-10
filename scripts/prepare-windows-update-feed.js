@@ -2,8 +2,8 @@
 /**
  * Prepare a compact Squirrel.Windows update feed.
  *
- * The feed keeps the newest full package plus a complete contiguous delta
- * chain only when the whole chain is smaller than that full package.
+ * The feed keeps the newest full package plus the newest contiguous delta
+ * suffix whose cumulative size remains smaller than that full package.
  */
 const fs = require("fs");
 const path = require("path");
@@ -136,6 +136,7 @@ function selectDeltaChain({ entries, packageFiles, latestFull, previousManifest 
   while (true) {
     const edge = edgesByTarget.get(cursor);
     if (!edge) break;
+    if (totalBytes + edge.entry.size >= latestFull.size) break;
     selected.unshift({
       fileName: edge.entry.filename,
       fromVersion: edge.fromVersion,
@@ -146,9 +147,7 @@ function selectDeltaChain({ entries, packageFiles, latestFull, previousManifest 
     totalBytes += edge.entry.size;
     cursor = edge.fromVersion;
   }
-  return totalBytes < latestFull.size
-    ? { deltas: selected, totalBytes }
-    : { deltas: [], totalBytes: 0 };
+  return { deltas: selected, totalBytes };
 }
 
 function prepareWindowsUpdateFeed({
