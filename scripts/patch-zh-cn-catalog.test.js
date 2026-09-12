@@ -234,7 +234,7 @@ test("plan mode uses 计划 while subscription plans keep 套餐", () => {
   assert.equal(ZH_CN_FORCED_OVERRIDES.has("settings.usage.plan.title"), false);
 });
 
-test("translation specs cover the injected sidebar delete messages", () => {
+test("legacy sidebar delete translations do not override upstream wording", () => {
   assert.equal(ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThread"), "删除聊天");
   assert.equal(
     ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThreadConfirmAction"),
@@ -243,6 +243,15 @@ test("translation specs cover the injected sidebar delete messages", () => {
   assert.equal(
     ZH_CN_TRANSLATIONS.get("sidebarElectron.deleteThreadError"),
     "删除聊天失败",
+  );
+  assert.equal(ZH_CN_FORCED_OVERRIDES.has("sidebarElectron.deleteThread"), false);
+  assert.equal(
+    ZH_CN_FORCED_OVERRIDES.has("sidebarElectron.deleteThreadConfirmAction"),
+    false,
+  );
+  assert.equal(
+    ZH_CN_FORCED_OVERRIDES.has("sidebarElectron.deleteThreadError"),
+    false,
   );
 });
 

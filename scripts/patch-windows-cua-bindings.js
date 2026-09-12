@@ -6,17 +6,26 @@ const { SRC_DIR, relPath } = require("./patch-util");
 const ASSET = path.join(__dirname, "assets", "computer-use", "windows-cua-app-bindings.mjs");
 const RUNTIME_ROOT = path.join(SRC_DIR, "win", "cua_node", "bin", "node_modules", "@oai", "cua");
 const GLOBALS = path.join(RUNTIME_ROOT, "dist", "lib", "js", "oai_js_cua", "src", "tinysky_alt", "globals.js");
-const IMPORT = 'import{installWindowsAppBindings as o}from"./windows_app_bindings.js";';
+const IMPORT = 'import{installWindowsAppBindings}from"./windows_app_bindings.js";';
 const LEGACY_ANCHOR = 'Reflect.set(globalThis,"cua",t({browsers:i,computer:l}));';
-const LEGACY_REPLACEMENT = 'const a=t({browsers:i,computer:l});await o(a);Reflect.set(globalThis,"cua",a);';
+const LEGACY_REPLACEMENT = 'const a=t({browsers:i,computer:l});await installWindowsAppBindings(a);Reflect.set(globalThis,"cua",a);';
 const SETUP_ASSIGNMENT = /Object\.assign\(([\w$]+),([\w$]+)\)(?=\}\)\),[\w$]+\})/;
+const EAGER_ASSIGNMENT = /Object\.assign\(([\w$]+),\{initialize:\1\.getState\}\),Reflect\.set\(globalThis,"cua",\1\);/;
 
 function patchGlobalsSource(source) {
-  if (source.includes(IMPORT)) return source;
+  if (source.includes('from"./windows_app_bindings.js"')) return source;
   const imported = source.replace('from"./create_tinysky_alt.js";', 'from"./create_tinysky_alt.js";' + IMPORT);
   if (imported === source) throw new Error("Unified CUA globals import changed");
+  const eager = imported.replace(
+    EAGER_ASSIGNMENT,
+    "Object.assign($1,{initialize:$1.getState});await installWindowsAppBindings($1);Reflect.set(globalThis,\"cua\",$1);",
+  );
+  if (eager !== imported) return eager;
   if (imported.includes(LEGACY_ANCHOR)) return imported.replace(LEGACY_ANCHOR, LEGACY_REPLACEMENT);
-  const patched = imported.replace(SETUP_ASSIGNMENT, "Object.assign($1,$2);return o($1)");
+  const patched = imported.replace(
+    SETUP_ASSIGNMENT,
+    "Object.assign($1,$2);return installWindowsAppBindings($1)",
+  );
   if (patched === imported) throw new Error("Unified CUA globals setup changed");
   return patched;
 }

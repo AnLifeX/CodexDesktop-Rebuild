@@ -7,7 +7,6 @@ const {
   planPluginPlatform,
 } = require("./patch-plugin-auth");
 const { planArchivePlatform } = require("./patch-archive-delete");
-const { planSidebarPlatform } = require("./patch-sidebar-delete");
 const { validateLocalUpdaterSources } = require("./patch-local-updater");
 const { patchWindowsTraySource } = require("./patch-windows-tray");
 
@@ -882,23 +881,6 @@ function inspectSharedArchiveContract(sources) {
   }
 }
 
-function inspectSidebarContract(sources) {
-  try {
-    const candidates = patchCandidates(sources, ["webview/assets"]);
-    const plan = planSidebarPlatform({
-      platform: "win",
-      candidates,
-    });
-    const [{ threadActions, sidebar, result }] = plan.writes;
-    if (result.status !== "already") {
-      throw new Error("sidebar-delete targets are patchable instead of fully patched");
-    }
-    return { files: uniquePlanFiles([threadActions, sidebar]) };
-  } catch (error) {
-    return inspectionFailure(error);
-  }
-}
-
 function inspectLocalUpdaterContract(sources) {
   try {
     const prefix = "src/win/_asar/";
@@ -954,10 +936,6 @@ const CONTRACT_DEFINITIONS = [
   {
     id: "archive-delete",
     inspect: inspectSharedArchiveContract,
-  },
-  {
-    id: "sidebar-delete",
-    inspect: inspectSidebarContract,
   },
   {
     id: "updater",
