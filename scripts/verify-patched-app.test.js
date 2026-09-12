@@ -17,10 +17,6 @@ const {
   patchPluginMainSource,
   patchPluginWebviewSource,
 } = require("./patch-plugin-auth");
-const {
-  patchThreadActionsSource,
-  patchSidebarSource,
-} = require("./patch-sidebar-delete");
 
 const EXPECTED_VERSION = "26.707.31428";
 const UPDATER_BACKEND_FIXTURE = [
@@ -37,7 +33,6 @@ const CONTRACT_IDS = [
   "fast",
   "plugin",
   "archive-delete",
-  "sidebar-delete",
   "updater",
 ];
 
@@ -129,24 +124,6 @@ const MARKERS = [
     contract: "archive-delete",
     file: "webview/assets/data-controls-fixture.js",
     text: "const labels={delete:{id:`settings.dataControls.archivedChats.delete`}};function remove(send,conversationId){send(`delete-archived-conversation`,{conversationId});send(`delete-archived-conversation`,{conversationId});return classify(send,`thread/delete`)}export{remove as DataControlsSettings}",
-  },
-  {
-    id: "sidebar-thread-actions",
-    contract: "sidebar-delete",
-    file: "webview/assets/thread-actions-fixture.js",
-    text: "structural thread actions",
-  },
-  {
-    id: "sidebar-delete",
-    contract: "sidebar-delete",
-    file: "webview/assets/sidebar-flat-sections-fixture.js",
-    text: "const deleteItem = { id:`delete-thread` };",
-  },
-  {
-    id: "sidebar-inline-confirmation",
-    contract: "sidebar-delete",
-    file: "webview/assets/sidebar-flat-sections-fixture.js",
-    text: "const confirmItem = { id:`thread-delete-confirm-action` };",
   },
   {
     id: "updater-bootstrap",
@@ -275,15 +252,6 @@ const STRUCTURAL_PLUGIN_WEBVIEW = [
   "function K(e){let{hostId:n}=e,a=v(`410262010`),o={featureName:`browser_use`,hostId:n},s=j(o),l=a?s.enabled:`statsig-disabled`,h=l===`available`,_=l===`available`,y=l===`loading`;return{allowed:h,available:_,isLoading:y,reason:l}}",
   "export{F as c,K as i,H as o}",
 ].join(";");
-const STRUCTURAL_THREAD_ACTIONS = [
-  "let $=g({archiveThread:{id:`sidebarElectron.archiveThread`,defaultMessage:`Archive task`,description:`Menu item to archive a local task`}})",
-  "function ne(){let e=(0,Q.c)(17),t=n(o),r=h(),i;i=e=>{let{conversationId:n,hostId:a,source:o,onArchiveStart:s,onArchiveSuccess:c,onArchiveError:l}=e;s?.(),v(`archive-conversation`,{conversationId:n,hostId:a,source:o}).then(()=>c?.()).catch(()=>{l?.(),t.get(y).danger(r.formatMessage($.archiveThreadError))})};let a=e=>{};let s=e=>{},c=e=>{},l=e=>{};let u;return u={archiveThread:i,interruptThread:a,renameThread:s,copyWorkingDirectory:c,copyConversationMarkdown:l},u}",
-].join(";");
-const STRUCTURAL_SIDEBAR = [
-  "function Ac(e){let t=(0,Nc.c)(8),{archive:n,pinAction:r}=e,i=L();if(n==null&&r==null)return null;let a;t[0]===r?a=t[1]:(a=r==null?[]:[{id:`thread-pin-action`,ariaLabel:r.ariaLabel,onClick:r.onClick}],t[0]=r,t[1]=a);let o;t[2]!==n||t[3]!==i?(o=n==null?[]:[{id:`thread-primary-action`,ariaLabel:i.formatMessage(Sr.archiveThread),icon:(0,Fc.jsx)(Aa,{}),onClick:n}],t[2]=n,t[3]=i,t[4]=o):o=t[4];let s;return t[5]!==a||t[6]!==o?(s=(0,Fc.jsx)(oc,{actions:[...a,...o],className:Pa}),t[5]=a,t[6]=o,t[7]=s):s=t[7],s}",
-  "function jc({conversationId:e,showPinActionOnHover:a=!1,canPin:i=!0,threadSummary:_=null}){let b=o(m),[S,C]=(0,Pc.useState)(!1),w=L(),{archiveThread:F,markThreadAsRead:R}=wr(),{beginArchive:ne,handleArchiveSuccess:re,handleArchiveError:ie}=Na({}),we=()=>{ne(),F({conversationId:e,hostId:_?.hostId,source:`sidebar_context_menu`,onArchiveSuccess:re,onArchiveError:ie})},Te=le(()=>{we()}),je=le(()=>[{id:`archive-thread`,message:Sr.archiveThread,onSelect:Te}]),Me=a&&i,Ne=(0,Pc.useCallback)(({archive:t})=>(0,Fc.jsx)(Ac,{archive:t,pinAction:Me?{ariaLabel:w.formatMessage(Eo),isPinned:!1,onClick:()=>{}}:void 0}),[Te,w,e,b,Me]);let Pe=(0,Fc.jsx)(Ma,{additionalHoverActionCount:Me?1:0,renderActions:Ne});return(0,Fc.jsx)(me,{getItems:je,children:Pe})}",
-].join(";");
-
 function installStructuralFeatureFixtures(fixture) {
   let pluginMain = patchPluginMainSource(STRUCTURAL_PLUGIN_MAIN).code;
   if (!fixture.includedMarkers.has("browser-availability")) {
@@ -355,33 +323,6 @@ function installStructuralFeatureFixtures(fixture) {
     nativeDataControls,
   );
 
-  let threadActions = patchThreadActionsSource(STRUCTURAL_THREAD_ACTIONS).code;
-  let sidebar = patchSidebarSource(STRUCTURAL_SIDEBAR).code;
-  if (!fixture.includedMarkers.has("sidebar-thread-actions")) {
-    threadActions = STRUCTURAL_THREAD_ACTIONS;
-  }
-  if (!fixture.includedMarkers.has("sidebar-delete")) {
-    sidebar = sidebar.replace("id:`delete-thread`", "id:`missing-delete-thread`");
-  }
-  if (!fixture.includedMarkers.has("sidebar-inline-confirmation")) {
-    sidebar = sidebar.replace(
-      "id:`thread-delete-confirm-action`",
-      "id:`missing-thread-delete-confirm-action`",
-    );
-  }
-  writeText(
-    path.join(fixture.asarRoot, "webview", "assets", "thread-actions-fixture.js"),
-    threadActions,
-  );
-  writeText(
-    path.join(
-      fixture.asarRoot,
-      "webview",
-      "assets",
-      "sidebar-flat-sections-fixture.js",
-    ),
-    sidebar,
-  );
   installCanonicalUpdaterWhenComplete(fixture);
 }
 
@@ -478,7 +419,6 @@ for (const marker of MARKERS) {
 
 for (const [contract, markerIds] of [
   ["fast", ["fast-mode", "fast-api-key-authorization"]],
-  ["sidebar-delete", ["sidebar-delete", "sidebar-inline-confirmation"]],
 ]) {
   test(`${contract} requires its markers in the same bundle`, (t) => {
     const fixture = createFixture(t, { omitMarkers: markerIds });
@@ -1111,57 +1051,6 @@ test("archive-delete rejects mismatched legacy manager and thread bindings", (t)
   );
 });
 
-test("sidebar-delete rejects inert IDs without structural thread action and row wiring", (t) => {
-  const fixture = createFixture(t);
-  writeText(
-    path.join(
-      fixture.asarRoot,
-      "webview",
-      "assets",
-      "sidebar-flat-sections-fixture.js",
-    ),
-    "const deleteItem={id:`delete-thread`};const confirm={id:`thread-delete-confirm-action`};",
-  );
-
-  assert.throws(
-    () => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION),
-    (error) => error.message.includes("sidebar-delete"),
-  );
-});
-
-test("production verification discovers current app-initial and app-primary sidebar bundles", (t) => {
-  const fixture = createFixture(t);
-  const managerBacked = [
-    "let CurrentMessages=g({archiveThread:{id:`sidebarElectron.archiveThread`,defaultMessage:`Archive chat`,description:`Menu item to archive a local chat`}})",
-    "function CurrentActions(){let scope=getScope(),intl=getIntl(),archiveAction,copyAction,result;archiveAction=input=>{let{conversationId:threadId,hostId:hostId,source,onArchiveStart,onArchiveSuccess,onArchiveError}=input;onArchiveStart?.(),ManagerFactory(scope,hostId??scope.get(DefaultHost,threadId)).archiveConversation(threadId,{source}).then(()=>onArchiveSuccess?.()).catch(()=>{onArchiveError?.(),scope.get(Toast).danger(intl.formatMessage(CurrentMessages.archiveThreadError))})};copyAction=input=>{};return result={archiveThread:archiveAction,copyConversationMarkdown:copyAction},result}",
-  ].join(";");
-  const nativeAppMain = fs.readFileSync(
-    path.join(fixture.asarRoot, "webview", "assets", "app-main-fixture.js"),
-    "utf8",
-  );
-  writeText(
-    path.join(fixture.asarRoot, "webview", "assets", "app-initial-current.js"),
-    `${nativeAppMain};${patchThreadActionsSource(managerBacked).code}`,
-  );
-  writeText(
-    path.join(fixture.asarRoot, "webview", "assets", "app-primary-current.js"),
-    patchSidebarSource(STRUCTURAL_SIDEBAR).code,
-  );
-  for (let index = 0; index < 501; index += 1) {
-    writeText(
-      path.join(fixture.asarRoot, "webview", "assets", `noise-${index}.js`),
-      "",
-    );
-  }
-
-  const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
-  assert.ok(
-    result.contracts["sidebar-delete"].includes(
-      "src/win/_asar/webview/assets/app-primary-current.js",
-    ),
-  );
-});
-
 test("updater resolves the hashed runtime bootstrap and rejects early-bootstrap-only evidence", (t) => {
   const fixture = createFixture(t);
   const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
@@ -1216,15 +1105,13 @@ test("reports recursive evidence files for every satisfied contract", (t) => {
   ]);
 });
 
-test("accepts Fast, plugin, and sidebar contracts consolidated into app-initial", (t) => {
+test("accepts Fast and plugin contracts consolidated into app-initial", (t) => {
   const fixture = createFixture(t);
   const assetRoot = path.join(fixture.asarRoot, "webview", "assets");
   const consolidatedNames = [
     "use-service-tier-settings-fixture.js",
     "read-service-tier-for-request-fixture.js",
     "use-is-plugins-enabled-fixture.js",
-    "thread-actions-fixture.js",
-    "sidebar-flat-sections-fixture.js",
   ];
   const consolidatedSource = consolidatedNames
     .map((fileName) => fs.readFileSync(path.join(assetRoot, fileName), "utf8"))
@@ -1237,7 +1124,7 @@ test("accepts Fast, plugin, and sidebar contracts consolidated into app-initial"
   const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
   const consolidatedEvidence =
     "src/win/_asar/webview/assets/app-initial-current.js";
-  for (const contract of ["fast", "plugin", "sidebar-delete"]) {
+  for (const contract of ["fast", "plugin"]) {
     assert.ok(result.contracts[contract].includes(consolidatedEvidence));
   }
 });

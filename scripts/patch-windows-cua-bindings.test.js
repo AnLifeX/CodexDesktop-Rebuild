@@ -9,6 +9,7 @@ const { ASSET, installWindowsCuaBindings, patchGlobalsSource } = require("./patc
 
 const GLOBALS = 'import{cua as r}from"../cua.js";import{create_tinysky_alt as t}from"./create_tinysky_alt.js";null!==r.browsers&&null!==r.computer||await r.initialize();const{browsers:i,computer:l}=r;if(null===i||null===l)throw new Error("tinyskyAlt failed to initialize");Reflect.set(globalThis,"cua",t({browsers:i,computer:l}));';
 const SETUP_GLOBALS = 'import{__awaiter as t}from"../../../../../node_modules/tslib.js";import{create_tinysky_alt as e}from"./create_tinysky_alt.js";let i;const l={initialize(){return t(this,void 0,void 0,function*(){return yield n(),l.getState()})}};function n(t={}){return null!=i||(i=e(t).then(t=>{Object.assign(l,t)})),i}Reflect.set(globalThis,"cua",l);export{n as setupCUA};';
+const EAGER_GLOBALS = 'import{create_tinysky_alt as e}from"./create_tinysky_alt.js";var r;const o=globalThis.nodeRepl,t=null===(r=null==o?void 0:o.env)||void 0===r?void 0:r.CUA_REPL_ENABLED_SURFACES;if(void 0===t)throw new Error("CUA_REPL_ENABLED_SURFACES is required");const i=new Set(t.split(",").map((e=>e.trim())).filter(Boolean)),s=["browser","computer"];const n=await e({browser:i.has("browser"),computer:i.has("computer")});Object.assign(n,{initialize:n.getState}),Reflect.set(globalThis,"cua",n);';
 
 test("installs Windows bindings into the CUA runtime idempotently", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-windows-cua-"));
@@ -27,7 +28,16 @@ test("installs Windows bindings into the CUA runtime idempotently", (t) => {
 test("installs after current deferred CUA setup", () => {
   const patched = patchGlobalsSource(SETUP_GLOBALS);
   assert.match(patched, /installWindowsAppBindings/);
-  assert.match(patched, /Object\.assign\(l,t\);return o\(l\)/);
+  assert.match(patched, /Object\.assign\(l,t\);return installWindowsAppBindings\(l\)/);
+});
+
+test("installs after current eager CUA setup", () => {
+  const patched = patchGlobalsSource(EAGER_GLOBALS);
+  assert.match(
+    patched,
+    /Object\.assign\(n,\{initialize:n\.getState\}\);await installWindowsAppBindings\(n\);Reflect\.set\(globalThis,"cua",n\)/,
+  );
+  assert.equal(patchGlobalsSource(patched), patched);
 });
 
 test("standard patch pipeline installs Windows CUA bindings after the screenshot fallback", () => {

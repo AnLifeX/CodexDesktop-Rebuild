@@ -1405,9 +1405,6 @@ if (ZH_CN_TRANSLATIONS.size !== ZH_CN_TRANSLATION_SPECS.length) {
 // Keep this intentionally small. These are confirmed semantic mistakes in the
 // current upstream catalog, not merely different wording preferences.
 const ZH_CN_FORCED_OVERRIDES = new Map([
-  ["sidebarElectron.deleteThread", "删除聊天"],
-  ["sidebarElectron.deleteThreadConfirmAction", "确认"],
-  ["sidebarElectron.deleteThreadError", "删除聊天失败"],
   ["composer.placeholder.plan", "描述你的任务以生成计划…"],
   ["composerTips.planMode.action", "创建计划"],
   ["implementPlanRequest.editedPlanError", "无法使用已编辑的计划，请重试"],
