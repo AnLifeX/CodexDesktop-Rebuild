@@ -13,7 +13,7 @@
 const fs = require("fs");
 const path = require("path");
 const { parse } = require("acorn");
-const { locateBundles, relPath, SRC_DIR } = require("./patch-util");
+const { SRC_DIR } = require("./patch-util");
 
 const UPDATER_METHODS = new Set([
   "shouldIncludeSparkle",
@@ -144,30 +144,22 @@ function patchUpdaterContracts({ loggerSource, workerSource }) {
   };
 }
 
-function locateTargets(platform) {
-  const platforms = platform
-    ? [platform]
-    : ["mac-arm64", "mac-x64", "win"].filter((p) =>
-        fs.existsSync(path.join(SRC_DIR, p, "_asar", ".vite", "build")),
-      );
-
-  const targets = [];
-  for (const plat of platforms) {
-    const buildDir = path.join(SRC_DIR, plat, "_asar", ".vite", "build");
-    if (!fs.existsSync(buildDir)) continue;
-    for (const f of fs.readdirSync(buildDir)) {
-      if (!f.endsWith(".js")) continue;
-      const fp = path.join(buildDir, f);
-      const src = fs.readFileSync(fp, "utf-8");
+function locateTargets(buildDir) {
+  return fs.readdirSync(buildDir).filter((name) => {
+    if (!name.endsWith(".js")) return false;
+    const source = fs.readFileSync(path.join(buildDir, name), "utf-8");
+    if (!source.includes("shouldIncludeSparkle")) return false;
+    const ast = parse(source, { ecmaVersion: "latest", sourceType: "module" });
+    let found = false;
+    walk(ast, (node) => {
       if (
-        src.includes("shouldIncludeSparkle") &&
-        src.includes("shouldIncludeUpdater")
-      ) {
-        targets.push({ platform: plat, path: fp });
-      }
-    }
-  }
-  return targets;
+        node.type === "Property" &&
+        (node.key?.name ?? node.key?.value) === "shouldIncludeSparkle" &&
+        node.value?.type === "FunctionExpression"
+      ) found = true;
+    });
+    return found;
+  });
 }
 
 function main() {
@@ -182,8 +174,8 @@ function main() {
   if (platforms.length === 0) throw new Error("updater expected at least one platform");
   const plans = platforms.map((platformName) => {
     const buildDir = path.join(SRC_DIR, platformName, "_asar", ".vite", "build");
-    const files = fs.readdirSync(buildDir);
-    const loggerNames = files.filter((name) => /^file-based-logger-.*\.js$/.test(name));
+    const files = locateTargets(buildDir);
+    const loggerNames = files.filter((name) => name !== "worker.js");
     const workerNames = files.filter((name) => name === "worker.js");
     if (loggerNames.length !== 1) {
       throw new Error(`updater logger expected exactly 1 target for ${platformName}, found ${loggerNames.length}`);
@@ -222,4 +214,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { collectPatches, patchUpdaterSource, patchUpdaterContracts };
+module.exports = { collectPatches, patchUpdaterSource, patchUpdaterContracts, locateTargets };
