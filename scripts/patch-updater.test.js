@@ -1,10 +1,37 @@
 #!/usr/bin/env node
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { patchUpdaterSource, patchUpdaterContracts } = require("./patch-updater");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { patchUpdaterSource, patchUpdaterContracts, locateTargets } = require("./patch-updater");
 
 const UPDATER_FIXTURE =
   "let policy={shouldIncludeSparkle:function(e,t,n){return m(e,t,`darwin`,n)},shouldIncludeWindowsUpdater:function(e,t,n){return h(e,t,n)&&g(e)!=null},shouldIncludeWindowsMsixUpdater:function(e,t,n){return h(e,t,n)&&g(e)?.kind===`msix`},shouldIncludeUpdater:function(e,t,n){return policy.shouldIncludeSparkle(e,t,n)||policy.shouldIncludeWindowsUpdater(e,t,n)}}";
+
+test("locates renamed policy bundles by definitions, ignoring callers and preserving ambiguous targets", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-updater-test-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, "worker.js"), UPDATER_FIXTURE);
+  fs.writeFileSync(path.join(dir, "main-current.js"), "policy.shouldIncludeSparkle(e,t,n);policy.shouldIncludeUpdater(e,t,n)");
+  for (const name of ["file-based-logger-old.js", "bootstrap-current.js"]) {
+    const file = path.join(dir, name);
+    // Current upstream uses shorthand methods; older bundles used function properties.
+    const source = name.startsWith("bootstrap")
+      ? UPDATER_FIXTURE.replaceAll(":function", "")
+      : UPDATER_FIXTURE;
+    fs.writeFileSync(file, source);
+    assert.deepEqual(locateTargets(dir).sort(), [name, "worker.js"].sort());
+    const patched = patchUpdaterSource(source);
+    fs.writeFileSync(file, patched.code);
+    assert.deepEqual(locateTargets(dir).sort(), [name, "worker.js"].sort());
+    fs.unlinkSync(file);
+  }
+  assert.deepEqual(locateTargets(dir), ["worker.js"]);
+  fs.writeFileSync(path.join(dir, "bootstrap-one.js"), UPDATER_FIXTURE);
+  fs.writeFileSync(path.join(dir, "bootstrap-two.js"), UPDATER_FIXTURE);
+  assert.equal(locateTargets(dir).length, 3);
+});
 
 test("disables all four updater methods in one current bundle idempotently", () => {
   assert.equal(typeof patchUpdaterSource, "function");
