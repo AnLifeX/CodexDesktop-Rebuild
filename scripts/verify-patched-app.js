@@ -1051,6 +1051,12 @@ function verifyPatchedApp(root, platform, expectedVersion) {
   const failures = [];
   const packageInspection = inspectPackage(packagePath, expectedVersion);
   if (packageInspection.failure) failures.push(packageInspection.failure);
+  if (packageInspection.packageJson?.codexWindowsAppContainedCore === "1") {
+    failures.push({
+      id: "windows-app-contained-core",
+      detail: "Squirrel builds must disable codexWindowsAppContainedCore",
+    });
+  }
 
   const sources = [];
   try {

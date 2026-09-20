@@ -1191,6 +1191,18 @@ test("rejects a missing or malformed extracted package manifest", async (t) => {
   });
 });
 
+test("rejects MSIX-only app-contained core in a Squirrel build", (t) => {
+  const fixture = createFixture(t);
+  const packagePath = path.join(fixture.asarRoot, "package.json");
+  const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  packageJson.codexWindowsAppContainedCore = "1";
+  fs.writeFileSync(packagePath, JSON.stringify(packageJson));
+  assert.throws(
+    () => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION),
+    /windows-app-contained-core.*Squirrel builds must disable/,
+  );
+});
+
 test("supports the Windows verification CLI and prints evidence files", (t) => {
   const fixture = createFixture(t);
   const script = path.join(__dirname, "verify-patched-app.js");
@@ -1225,6 +1237,10 @@ test("patch-all passes the extracted Windows version to the verifier", (t) => {
 
   const { runPatchAll } = require("./patch-all");
   const fixture = createFixture(t);
+  const packagePath = path.join(fixture.asarRoot, "package.json");
+  const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  packageJson.codexWindowsAppContainedCore = "1";
+  fs.writeFileSync(packagePath, JSON.stringify(packageJson));
   const patchCalls = [];
   const verificationCalls = [];
   const logger = { error() {}, log() {} };
@@ -1246,5 +1262,6 @@ test("patch-all passes the extracted Windows version to the verifier", (t) => {
   assert.deepEqual(verificationCalls, [
     [fixture.root, "win", EXPECTED_VERSION],
   ]);
+  assert.equal(JSON.parse(fs.readFileSync(packagePath, "utf8")).codexWindowsAppContainedCore, "0");
   assert.equal(result.failed, 0);
 });

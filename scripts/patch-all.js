@@ -62,6 +62,14 @@ function readExtractedVersion(projectRoot) {
   return packageJson.version;
 }
 
+function disableWindowsAppContainedCore(projectRoot) {
+  const packagePath = path.join(projectRoot, "src", "win", "_asar", "package.json");
+  const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  if (packageJson.codexWindowsAppContainedCore !== "1") return;
+  packageJson.codexWindowsAppContainedCore = "0";
+  fs.writeFileSync(packagePath, JSON.stringify(packageJson, null, 2) + "\n");
+}
+
 function targetsWindows(platform, extra, projectRoot) {
   if (extra.includes("--check")) return false;
   if (platform === "win") return true;
@@ -106,6 +114,7 @@ function runPatchAll(args, dependencies = {}) {
     total++;
     logger.log("\n== verify-patched-app ==");
     try {
+      disableWindowsAppContainedCore(projectRoot);
       const expectedVersion = readExtractedVersion(projectRoot);
       if (verifier) {
         const result = verifier(projectRoot, "win", expectedVersion);

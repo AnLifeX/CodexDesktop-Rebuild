@@ -353,6 +353,14 @@ function stripExternalAssemblyManifestDependencies(appDirectory, exeName) {
   console.log(`   [ok] stripped root-stub-breaking manifest dependency from ${exeName}`);
 }
 
+function stripRootExecutableManifestDependencies(appDirectory) {
+  for (const entry of fs.readdirSync(appDirectory, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.toLowerCase().endsWith(".exe")) {
+      stripExternalAssemblyManifestDependencies(appDirectory, entry.name);
+    }
+  }
+}
+
 function createLegacyExecutableAlias(appDirectory, primaryExe, legacyExe = "Codex.exe") {
   if (primaryExe.toLowerCase() === legacyExe.toLowerCase()) return false;
   const primaryPath = path.join(appDirectory, primaryExe);
@@ -474,7 +482,7 @@ async function main() {
 
   const { appDirectory, primaryExe } = stageUpstreamApp(shortWorkspace);
   applyPatchedResources(appDirectory, primaryExe);
-  stripExternalAssemblyManifestDependencies(appDirectory, primaryExe);
+  stripRootExecutableManifestDependencies(appDirectory);
   createLegacyExecutableAlias(appDirectory, primaryExe);
   markSquirrelAware(appDirectory, primaryExe);
   const additionalFiles = collectAdditionalFiles(appDirectory, primaryExe);
