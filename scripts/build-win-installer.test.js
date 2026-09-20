@@ -42,7 +42,7 @@ function loadInstallerInternals() {
   const filename = path.join(__dirname, "build-win-installer.js");
   const isolatedSource = source.replace(
     /main\(\)\.catch\(\(error\) => \{[\s\S]*?\n\}\);\s*$/,
-    "module.exports = { compactSkyJsDependencyCache, createLegacyExecutableAlias, markSquirrelAware, resolvePrimaryExecutableNameFromManifest, resolveSquirrelReleaseOptions };\n",
+    "module.exports = { compactSkyJsDependencyCache, createLegacyExecutableAlias, markSquirrelAware, resolvePrimaryExecutableNameFromManifest, resolveSquirrelReleaseOptions, stripRootExecutableManifestDependencies };\n",
   );
   const module = { exports: {} };
   vm.runInNewContext(isolatedSource, {
@@ -393,6 +393,32 @@ function writePeWithoutVersionInfo(file) {
   resources.outputResource(executable);
   fs.writeFileSync(file, Buffer.from(executable.generate()));
 }
+
+test("strips versioned assembly dependencies from every root EXE", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-squirrel-manifest-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const version = "153.0.8010.48";
+  fs.writeFileSync(path.join(root, `${version}.manifest`), "<assembly/>");
+  for (const name of ["ChatGPT.exe", "chrome_proxy.exe"]) {
+    const file = path.join(root, name);
+    writePeWithoutVersionInfo(file);
+    const executable = ResEdit.NtExecutable.from(fs.readFileSync(file), { ignoreCert: true });
+    const resources = ResEdit.NtExecutableResource.from(executable);
+    resources.entries.find((entry) => entry.type === 24).bin = Buffer.from(
+      `<assembly><dependency><dependentAssembly><assemblyIdentity type="win32" name="${version}" version="${version}" language="*"/></dependentAssembly></dependency></assembly>`,
+    );
+    resources.outputResource(executable);
+    fs.writeFileSync(file, Buffer.from(executable.generate()));
+  }
+
+  const { stripRootExecutableManifestDependencies } = loadInstallerInternals();
+  stripRootExecutableManifestDependencies(root);
+  for (const name of ["ChatGPT.exe", "chrome_proxy.exe"]) {
+    const executable = ResEdit.NtExecutable.from(fs.readFileSync(path.join(root, name)), { ignoreCert: true });
+    const resources = ResEdit.NtExecutableResource.from(executable);
+    assert.doesNotMatch(Buffer.from(resources.entries.find((entry) => entry.type === 24).bin).toString(), /dependentAssembly/);
+  }
+});
 
 function writePeWithVersionInfo(file) {
   const executable = ResEdit.NtExecutable.createEmpty(false, false);
