@@ -30,6 +30,7 @@ const PATCHES = [
   "patch-updater.js",
   "patch-local-updater.js",
   "patch-archive-delete.js",
+  "patch-sidebar-delete.js",
   "patch-show-all-local-sessions.js",
 ];
 
