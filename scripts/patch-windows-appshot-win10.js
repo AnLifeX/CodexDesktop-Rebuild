@@ -14,26 +14,37 @@ const { locateBundles, relPath } = require("./patch-util");
 
 const FUNCTION_ANCHOR =
   "function qit({decorateApp:e=async()=>null,loadHelperTransport:t})";
+const LATEST_FUNCTION_ANCHOR =
+  "function Wit({decorateApp:e=async()=>null,loadHelperTransport:t})";
 const SHARED_TRANSPORT_LOAD = "let e=c,n=t(e.signal).then";
 const ORIGINAL_CAPTURE =
   "try{let t=await M7(d(),o),r=Zit(e,f.window,f.decoration,i,s),a=await v(t,f,r,o);if(a==null)return null;let{transitionId:l,...p}=a,m={emitUpdate:n,signal:o==null?c.signal:AbortSignal.any([o,c.signal]),transitionId:l,transport:t,window:f.window},h=g(m);return u.add(h),h.finally(()=>u.delete(h)),{result:`started`,...p}}catch(e){return o?.aborted||D7().warning(`Windows Appshot start failed`,{safe:{requestId:a},sensitive:{error:e}}),null}";
 const PATCHED_CAPTURE =
   "let closeCaptureTransport=Number(process.getSystemVersion().split(`.`)[2])<20348,captureTransport;try{captureTransport=await M7(closeCaptureTransport?loadHelperTransport(o):d(),o);let r=Zit(e,f.window,f.decoration,i,s),a=await v(captureTransport,f,r,o);if(a==null){closeCaptureTransport&&await captureTransport.close().catch(()=>void 0);return null}let{transitionId:l,...p}=a,m={emitUpdate:n,signal:o==null?c.signal:AbortSignal.any([o,c.signal]),transitionId:l,transport:captureTransport,window:f.window},h=g(m);return u.add(h),h.finally(async()=>{u.delete(h);closeCaptureTransport&&await captureTransport.close().catch(()=>void 0)}),{result:`started`,...p}}catch(e){closeCaptureTransport&&captureTransport?.close().catch(()=>void 0),o?.aborted||D7().warning(`Windows Appshot start failed`,{safe:{requestId:a},sensitive:{error:e}}),null}";
 
+function latestCapture(source) {
+  return source.replaceAll("M7(", "P7(").replaceAll("Zit(", "Jit(")
+    .replaceAll("D7().warning", "k7().warning");
+}
+
 function patchMainSource(source) {
   if (source.includes("closeCaptureTransport=Number(process.getSystemVersion")) {
     return source.replace(SHARED_TRANSPORT_LOAD, "let e=c,n=loadHelperTransport(e.signal).then");
   }
-  if (!source.includes(FUNCTION_ANCHOR)) {
+  const latest = source.includes(LATEST_FUNCTION_ANCHOR);
+  const anchor = latest ? LATEST_FUNCTION_ANCHOR : FUNCTION_ANCHOR;
+  const originalCapture = latest ? latestCapture(ORIGINAL_CAPTURE) : ORIGINAL_CAPTURE;
+  const patchedCapture = latest ? latestCapture(PATCHED_CAPTURE) : PATCHED_CAPTURE;
+  if (!source.includes(anchor)) {
     throw new Error("Windows Appshot bridge function anchor changed");
   }
-  if (!source.includes(ORIGINAL_CAPTURE)) {
+  if (!source.includes(SHARED_TRANSPORT_LOAD) || !source.includes(originalCapture)) {
     throw new Error("Windows Appshot capture implementation changed");
   }
   return source
-    .replace(FUNCTION_ANCHOR, "function qit({decorateApp:e=async()=>null,loadHelperTransport})")
+    .replace(anchor, anchor.replace("loadHelperTransport:t", "loadHelperTransport"))
     .replace(SHARED_TRANSPORT_LOAD, "let e=c,n=loadHelperTransport(e.signal).then")
-    .replace(ORIGINAL_CAPTURE, PATCHED_CAPTURE);
+    .replace(originalCapture, patchedCapture);
 }
 
 function main() {
@@ -71,4 +82,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { FUNCTION_ANCHOR, ORIGINAL_CAPTURE, PATCHED_CAPTURE, patchMainSource };
+module.exports = { FUNCTION_ANCHOR, LATEST_FUNCTION_ANCHOR, ORIGINAL_CAPTURE, PATCHED_CAPTURE, latestCapture, patchMainSource };

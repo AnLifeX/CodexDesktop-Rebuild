@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   ORIGINAL_CAPTURE,
+  LATEST_FUNCTION_ANCHOR,
+  latestCapture,
   patchMainSource,
 } = require("./patch-windows-appshot-win10");
 
@@ -23,4 +25,13 @@ test("fails closed when the upstream Appshot bridge changes", () => {
     () => patchMainSource(`${FUNCTION_ANCHOR}xxx`),
     /capture implementation changed/,
   );
+});
+
+test("patches the latest Windows Appshot bridge", () => {
+  const source = `${LATEST_FUNCTION_ANCHOR}let e=c,n=t(e.signal).thenxxx${latestCapture(ORIGINAL_CAPTURE)}`;
+  const patched = patchMainSource(source);
+  assert.match(patched, /function Wit\(\{decorateApp:e=async\(\)=>null,loadHelperTransport\}\)/);
+  assert.match(patched, /await P7\(closeCaptureTransport\?loadHelperTransport\(o\):d\(\),o\)/);
+  assert.match(patched, /r=Jit\(e,f\.window/);
+  assert.equal(patchMainSource(patched), patched);
 });
