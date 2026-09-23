@@ -261,12 +261,18 @@ jobs:
           if ($status -eq "200") {
             $previousFeed = "out/make/squirrel.windows/x64/previous-feed"
             New-Item -ItemType Directory -Force -Path $previousFeed | Out-Null
-            gh release download "${{ env.WINDOWS_UPDATE_TAG }}" `
-              --repo $env:GITHUB_REPOSITORY `
-              --dir $previousFeed `
-              --pattern '*-delta.nupkg' `
-              --pattern 'RELEASES'
+            $feedUrl = "${{ env.WINDOWS_UPDATE_FEED }}"
+            $nonce = "${{ github.run_id }}-${{ github.run_attempt }}"
+            $releasesFile = Join-Path $previousFeed "RELEASES"
+            & curl.exe --fail --location --retry 3 --silent --show-error --output $releasesFile "$feedUrl/RELEASES?build=$nonce"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            foreach ($line in Get-Content $releasesFile) {
+              $parts = $line.Trim() -split '\s+'
+              if ($parts.Length -ne 3 -or $parts[1] -notlike '*-delta.nupkg') { continue }
+              $name = $parts[1]
+              & curl.exe --fail --location --retry 3 --silent --show-error --output (Join-Path $previousFeed $name) "$feedUrl/${name}?build=$nonce"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
             $args += @("--previous-manifest", $previousManifest)
           } elseif ($status -ne "404") {
             throw "Unable to read previous delta chain manifest: HTTP $status"

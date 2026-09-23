@@ -242,7 +242,7 @@ test("Windows update feeds carry forward and publish delta-chain metadata", () =
     );
     assert.match(
       text,
-      /gh release download "\$\{\{ env\.WINDOWS_UPDATE_TAG \}\}" `[\s\S]*?--pattern '\*-delta\.nupkg' `[\s\S]*?--pattern 'RELEASES'/,
+      /curl\.exe --fail --location --retry 3[\s\S]*?\$feedUrl\/RELEASES\?build=\$nonce[\s\S]*?Get-Content \$releasesFile[\s\S]*?\*-delta\.nupkg[\s\S]*?curl\.exe --fail --location --retry 3/,
       `${name} must download the packages and RELEASES referenced by the previous chain`,
     );
     assert.match(

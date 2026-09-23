@@ -348,29 +348,27 @@ async function getFileList(cookie, categoryId, ring) {
 
 async function getDownloadUrl(updateID, revisionNumber, ring, digest) {
   const soap = makeGetUrlSoap(updateID, revisionNumber, ring);
-  const res = await soapPost(
-    "https://fe3.delivery.mp.microsoft.com/ClientWebService/client.asmx/secured",
-    soap
-  );
-
-  if (res.status !== 200) return "";
-
-  const parsed = parseXml(res.body);
-  const locations = deepFindAll(parsed, "FileLocation");
-
-  for (const loc of locations) {
-    const fileDigest = deepFind(loc, "FileDigest");
-    const url = deepFind(loc, "Url");
-    if (fileDigest === digest && url) return url;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await soapPost(
+      "https://fe3.delivery.mp.microsoft.com/ClientWebService/client.asmx/secured",
+      soap
+    );
+    if (res.status === 200) {
+      const locations = deepFindAll(parseXml(res.body), "FileLocation");
+      for (const loc of locations) {
+        const fileDigest = deepFind(loc, "FileDigest");
+        const url = deepFind(loc, "Url");
+        if (fileDigest === digest && typeof url === "string" && url.startsWith("http")) return url;
+      }
+      // 如果 digest 匹配不到，返回第一个 URL
+      for (const loc of locations) {
+        const url = deepFind(loc, "Url");
+        if (url && typeof url === "string" && url.startsWith("http")) return url;
+      }
+    }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
   }
-
-  // 如果 digest 匹配不到，返回第一个 URL
-  for (const loc of locations) {
-    const url = deepFind(loc, "Url");
-    if (url && typeof url === "string" && url.startsWith("http")) return url;
-  }
-
-  return "";
+  throw new Error("Microsoft Store did not return a download URL after 3 attempts");
 }
 
 // ─── 深度搜索辅助 ────────────────────────────────────────────────
