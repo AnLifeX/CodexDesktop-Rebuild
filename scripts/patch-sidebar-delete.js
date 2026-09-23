@@ -109,12 +109,14 @@ function patchRow(source, node, hoverName) {
   const menu = /getMenuItems:([\w$]+)\?\(\)=>?([\w$]+)\(`row-actions`\):void 0/;
   const menuMatch = code.match(menu);
   if (!menuMatch) throw new Error("native sidebar menu factory changed");
+  const menuEnabled = menuMatch[1];
   const menuFactory = menuMatch[2];
   const hoverCall = new RegExp(`\\)\\(${hoverName.replace(/[$]/g, "\\$")},\\{`);
   if (!hoverCall.test(code)) throw new Error("native sidebar action rail call changed");
   code = code.replace(
     hoverCall,
-    `)(${hoverName},{deleteAction:${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`),`,
+    `)(${hoverName},{deleteAction:${menuEnabled}?{message:null,onSelect:()=>` +
+      `${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`,
   );
 
   const countProp = code.match(/additionalHoverActionCount:([\w$]+)/)?.[1];
@@ -124,13 +126,39 @@ function patchRow(source, node, hoverName) {
   if (!countMatch) throw new Error("native sidebar hover count binding changed");
   return code.replace(
     count,
-    `${countMatch[1]}${countProp}=(${countMatch[2]})+(${menuFactory}(\`row-actions\`).some(e=>e.id===\`delete-thread\`)?1:0)`,
+    `${countMatch[1]}${countProp}=(${countMatch[2]})+(${menuEnabled}?1:0)`,
   );
+}
+
+function migrateRenderTimeMenuLookup(source) {
+  const menuMatch = source.match(
+    /getMenuItems:([\w$]+)\?\(\)=>?([\w$]+)\(`row-actions`\):void 0/,
+  );
+  if (!menuMatch) throw new Error("native sidebar menu factory changed");
+  const [, menuEnabled, menuFactory] = menuMatch;
+  const action =
+    `deleteAction:${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`),`;
+  const count =
+    `+(${menuFactory}(\`row-actions\`).some(e=>e.id===\`delete-thread\`)?1:0)`;
+  if (source.split(action).length !== 2 || source.split(count).length !== 2) {
+    throw new Error("legacy sidebar render-time menu lookup is malformed");
+  }
+  return source
+    .replace(
+      action,
+      `deleteAction:${menuEnabled}?{message:null,onSelect:()=>${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`,
+    )
+    .replace(count, `+(${menuEnabled}?1:0)`);
 }
 
 function patchSidebarSource(source) {
   const markerCount = source.split(MARKER).length - 1;
-  if (markerCount === 1) return { status: "already", code: source };
+  if (markerCount === 1) {
+    const legacy = /deleteAction:[\w$]+\(`row-actions`\)\.find\(e=>e\.id===`delete-thread`\),/.test(source);
+    return legacy
+      ? { status: "patched", code: migrateRenderTimeMenuLookup(source) }
+      : { status: "already", code: source };
+  }
   if (markerCount !== 0) throw new Error(`sidebar delete marker count is ${markerCount}`);
   if (!source.includes("id:`delete-thread`")) {
     throw new Error("native delete-thread menu item is missing");

@@ -13,11 +13,31 @@ const SOURCE = [
 test("adds only a hover action backed by the native delete item", () => {
   const first = patchSidebarSource(SOURCE);
   assert.equal(first.status, "patched");
-  assert.match(first.code, /deleteAction:yt\(`row-actions`\)\.find\(e=>e\.id===`delete-thread`\)/);
+  assert.match(
+    first.code,
+    /deleteAction:E\?\{message:null,onSelect:\(\)=>yt\(`row-actions`\)\.find\(e=>e\.id===`delete-thread`\)\?\.onSelect\(\)\}:void 0/,
+  );
+  assert.match(first.code, /Et=\(\+!!bt\)\+\(E\?1:0\)/);
+  assert.doesNotMatch(first.code, /deleteAction:yt\(`row-actions`\)/);
+  assert.doesNotMatch(first.code, /yt\(`row-actions`\)\.some/);
   assert.match(first.code, /onClick:CodexDeleteAction\.onSelect/);
   assert.match(first.code, /id:`thread-delete-action`/);
   assert.doesNotMatch(first.code, /delete-conversation|thread\/delete/);
   assert.equal(patchSidebarSource(first.code).status, "already");
+});
+
+test("migrates the render-time menu lookup from the previous patch", () => {
+  const broken = patchSidebarSource(SOURCE).code
+    .replace(
+      "deleteAction:E?{message:null,onSelect:()=>yt(`row-actions`).find(e=>e.id===`delete-thread`)?.onSelect()}:void 0,",
+      "deleteAction:yt(`row-actions`).find(e=>e.id===`delete-thread`),",
+    )
+    .replace("+(E?1:0)", "+(yt(`row-actions`).some(e=>e.id===`delete-thread`)?1:0)");
+  const migrated = patchSidebarSource(broken);
+  assert.equal(migrated.status, "patched");
+  assert.doesNotMatch(migrated.code, /deleteAction:yt\(`row-actions`\)/);
+  assert.doesNotMatch(migrated.code, /yt\(`row-actions`\)\.some/);
+  assert.equal(patchSidebarSource(migrated.code).status, "already");
 });
 
 test("requires the official delete menu item", () => {

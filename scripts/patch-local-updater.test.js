@@ -186,6 +186,7 @@ function snapshotLocalUpdaterTargets(asarRoot, relativePaths) {
   assert.ok(bootstrap.includes("if(exeName.toLowerCase()!==legacyExeName.toLowerCase())"));
   assert.ok(bootstrap.includes("await runShortcutCommand([`--removeShortcut`,legacyExeName])"));
   assert.ok(bootstrap.includes("await runShortcutCommand([`--createShortcut`,exeName])"));
+  assert.ok(bootstrap.includes("fs.copyFileSync(bundledUpdater,path.join(rootFolder,`CodexUpdater.exe`))"));
   assert.ok(bootstrap.includes(".catch(e=>{try{console.warn('[CodexRebuildUpdater] shortcut lifecycle failed'"));
   assert.ok(bootstrap.includes(".finally(()=>app.quit())"));
   assert.ok(bootstrap.includes("Shortcut command timed out"));

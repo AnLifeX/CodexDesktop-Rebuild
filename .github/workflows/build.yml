@@ -210,7 +210,7 @@ jobs:
         id: windows_artifacts
         run: node scripts/resolve-release-artifacts.js --root out --rename-windows-setup --package-version "${{ steps.windows_version.outputs.windows_package_version }}" --release-version "${{ steps.windows_version.outputs.windows_release_version }}" --github-output
 
-      - name: Package Windows installer zip
+      - name: Package Windows installer and recovery updater zips
         shell: pwsh
         run: |
           $version = "${{ steps.windows_artifacts.outputs.windows_installer_version }}"
@@ -229,6 +229,18 @@ jobs:
           }
           if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) {
             throw "Windows installer zip was not created: $zip"
+          }
+          $updaterExe = Join-Path $PWD.Path "out/CodexUpdater.exe"
+          $updaterZip = Join-Path $PWD.Path "out/CodexUpdater-win-x64.zip"
+          if (-not (Test-Path -LiteralPath $updaterExe -PathType Leaf)) {
+            throw "Windows recovery updater is missing: $updaterExe"
+          }
+          Push-Location (Split-Path -Parent $updaterExe)
+          try {
+            & 7zz a -tzip -mx=1 $updaterZip (Split-Path -Leaf $updaterExe)
+            if ($LASTEXITCODE -ne 0) { throw "7zz failed with exit code $LASTEXITCODE" }
+          } finally {
+            Pop-Location
           }
 
       - name: Prepare Windows update feed artifact
@@ -316,6 +328,7 @@ jobs:
           files: |
             out/Codex-win-x64-${{ steps.windows_artifacts.outputs.windows_portable_version }}.zip
             out/CodexSetup-win-x64-${{ steps.windows_artifacts.outputs.windows_installer_version }}.zip
+            out/CodexUpdater-win-x64.zip
             out/windows-release-metadata.json
           fail_on_unmatched_files: true
           overwrite_files: true
@@ -331,9 +344,10 @@ jobs:
           RELEASE_TAG: codex-win-${{ steps.windows_artifacts.outputs.windows_installer_version }}
           PORTABLE: out/Codex-win-x64-${{ steps.windows_artifacts.outputs.windows_portable_version }}.zip
           INSTALLER: out/CodexSetup-win-x64-${{ steps.windows_artifacts.outputs.windows_installer_version }}.zip
+          UPDATER: out/CodexUpdater-win-x64.zip
           RELEASE_NOTES: out/windows-release-notes.md
         run: |
-          gh release upload $env:RELEASE_TAG $env:PORTABLE $env:INSTALLER --clobber
+          gh release upload $env:RELEASE_TAG $env:PORTABLE $env:INSTALLER $env:UPDATER --clobber
           gh release edit $env:RELEASE_TAG --notes-file $env:RELEASE_NOTES
 
       - name: Upload Windows update feed to draft staging release
@@ -509,6 +523,7 @@ jobs:
           printf '%s\n' \
             "Codex-win-x64-${RELEASE_VERSION}.zip" \
             "CodexSetup-win-x64-${RELEASE_VERSION}.zip" \
+            "CodexUpdater-win-x64.zip" \
             | sort > "$desired_assets"
           if [[ "${{ inputs.replace_existing_release }}" != "true" ]]; then
             printf '%s\n' "windows-release-metadata.json" >> "$desired_assets"
