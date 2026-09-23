@@ -13,6 +13,9 @@ const SOURCE =
 const CURRENT_SOURCE =
   "function group(e,u,c,l){let d=e.hostId==null||l(e.hostId)?c:e.hostId,p=u?.threadProjectAssignments?.[e.conversationId];return d+p}" +
   "function roots(n,t,a,l){let e=n.hostId==null||l(n.hostId)?t:n.hostId;if(n.summary!=null&&!ok(n.cwd))continue;let r=n.cwd;if(!r||e!==t&&!a.has(e))continue;}";
+const LATEST_SOURCE =
+  "function group(e,u,c,l){let d=e.hostId==null||l(e.hostId)?c:e.hostId,p=u?.threadProjectAssignments?.[e.conversationId];return d+p}" +
+  "function roots(n,t,a,l,u){let e=n.hostId==null||l(n.hostId)?t:n.hostId,p=u?.threadProjectAssignments?.[n.conversationId];if(n.summary!=null&&!ok(n.cwd))continue;let r=n.cwd;if(!r||e!==t&&!a.has(e))continue;}";
 
 test("patches structural local-session targets and remains idempotent", () => {
   const first = patchProjectGroupSource(SOURCE);
@@ -38,5 +41,13 @@ test("patches the current workspace-root layout with an intervening eligibility 
   assert.ok(first.code.includes(LOCAL_HOST_MARKER));
   assert.ok(first.code.includes(ROOT_HOST_MARKER));
   assert.match(first.code, /if\(n\.summary!=null&&!ok\(n\.cwd\)\)continue;/);
+  assert.equal(patchProjectGroupSource(first.code).status, "already");
+});
+
+test("patches the latest workspace-root layout without treating its assignment as a second local target", () => {
+  const first = patchProjectGroupSource(LATEST_SOURCE);
+  assert.equal(first.status, "patched");
+  assert.deepEqual(first.counts, { local: 1, root: 1 });
+  assert.match(first.code, /,p=u\?\.threadProjectAssignments/);
   assert.equal(patchProjectGroupSource(first.code).status, "already");
 });

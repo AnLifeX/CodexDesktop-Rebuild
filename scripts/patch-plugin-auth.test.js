@@ -130,6 +130,13 @@ test("adds the Windows computer CUA surface without changing macOS", () => {
   );
 });
 
+test("accepts desktop defaults after computerUseNodeRepl was removed", () => {
+  const source = LATEST_MAIN_FIXTURE.replace("computerUseNodeRepl:!1,", "");
+  const first = patchPluginMainSource(source);
+  assert.deepEqual(first.counts.defaults, { patchable: 9, already: 0, total: 9 });
+  assert.equal(patchPluginMainSource(first.code).status, "already");
+});
+
 test("requires every desktop feature default exactly once in one object", () => {
   const duplicatedDefault = LATEST_MAIN_FIXTURE.replace(
     "control:!1,multiWindow:!1",

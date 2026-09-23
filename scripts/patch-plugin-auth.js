@@ -1267,6 +1267,7 @@ function collectMainDefaults(source, ast, model) {
     const matches = featureObject.properties.filter(
       (property) => (property.key?.name ?? property.key?.value) === key,
     );
+    if (key === "computerUseNodeRepl" && matches.length === 0) continue;
     if (matches.length !== 1) {
       throw new Error(
         `plugin defaults expected ${key} exactly once, found ${matches.length}`,
@@ -1324,7 +1325,7 @@ function collectMainDefaults(source, ast, model) {
   return {
     patches: dedupePatches(patches),
     already: new Set(already).size,
-    total: FEATURE_KEYS.length + jsReplObjects.length,
+    total: featureObject.properties.length + jsReplObjects.length,
   };
 }
 
@@ -1575,7 +1576,7 @@ function collectWindowsComputerSurface(source, ast, model) {
       start: gate.start,
       end: gate.end,
       original: source.slice(gate.start, gate.end),
-      replacement: `(${source.slice(gate.start, gate.end)}||(${platform}===\`win32\`&&${features}.computerUse&&${features}.computerUseNodeRepl)${WINDOWS_COMPUTER_SURFACE_MARKER})`,
+      replacement: `(${source.slice(gate.start, gate.end)}||(${platform}===\`win32\`&&${features}.computerUse&&(${features}.computerUseNodeRepl??!0))${WINDOWS_COMPUTER_SURFACE_MARKER})`,
     }],
     already: 0,
     total: 1,

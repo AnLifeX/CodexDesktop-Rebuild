@@ -23,7 +23,6 @@ const TEXT_BUNDLE_EXTENSIONS = new Set([
 const FEATURE_DEFAULT_KEYS = new Set([
   "browserPane",
   "computerUse",
-  "computerUseNodeRepl",
   "control",
   "externalBrowserUse",
   "externalBrowserUseAllowed",
