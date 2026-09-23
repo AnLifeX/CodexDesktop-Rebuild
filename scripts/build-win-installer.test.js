@@ -23,6 +23,9 @@ assert.ok(
   winstallerRequireIndex > tempAssignmentIndex,
   "electron-winstaller must be required after TEMP/TMP/TMPDIR are set so it uses the short Squirrel temp path",
 );
+assert.match(source, /buildRecoveryUpdater\(appDirectory\)/, "installer must bundle the recovery updater");
+assert.match(source, /fs\.copyFileSync\(output, path\.join\(PROJECT_ROOT, "out", "CodexUpdater\.exe"\)\)/,
+  "the same recovery updater must be available for the standalone release zip");
 assert.match(
   source,
   /packageJson\.codexRebuildPackageVersion \|\| packageJson\.version/,

@@ -64,9 +64,10 @@ jobs:
           set -euo pipefail
           release_tag="codex-win-$RELEASE_VERSION"
           feed_staging_tag="windows-update-feed-staging-$RELEASE_VERSION"
-          mkdir -p artifacts/installer artifacts/portable artifacts/update-feed artifacts/metadata
+          mkdir -p artifacts/installer artifacts/portable artifacts/updater artifacts/update-feed artifacts/metadata
           gh release download "$release_tag" --dir artifacts/installer --pattern "CodexSetup-win-x64-$RELEASE_VERSION.zip" --clobber
           gh release download "$release_tag" --dir artifacts/portable --pattern "Codex-win-x64-$RELEASE_VERSION.zip" --clobber
+          gh release download "$release_tag" --dir artifacts/updater --pattern "CodexUpdater-win-x64.zip" --clobber
           gh release download "$release_tag" --dir artifacts/metadata --pattern "windows-release-metadata.json" --clobber
           gh release download "$feed_staging_tag" --dir artifacts/update-feed --pattern '*.nupkg' --pattern 'RELEASES' --clobber
           release_json="$(gh release view "$release_tag" --json isDraft,assets,body)"
@@ -188,6 +189,7 @@ jobs:
           expected="$(printf '%s\n' \
             "CodexSetup-win-x64-$RELEASE_VERSION.zip" \
             "Codex-win-x64-$RELEASE_VERSION.zip" \
+            "CodexUpdater-win-x64.zip" \
             "windows-release-metadata.json" | sort)"
           actual="$(gh release view "$release_tag" --json assets --jq '.assets[].name' | sort)"
           if [ "$actual" != "$expected" ]; then
@@ -248,6 +250,7 @@ jobs:
           printf '%s\n' \
             "CodexSetup-win-x64-${RELEASE_VERSION}.zip" \
             "Codex-win-x64-${RELEASE_VERSION}.zip" \
+            "CodexUpdater-win-x64.zip" \
             > "$desired_assets"
           sort -o "$desired_assets" "$desired_assets"
 

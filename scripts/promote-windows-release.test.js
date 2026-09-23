@@ -75,6 +75,7 @@ test("promotion workflow downloads exact draft Release assets and verifies sourc
   assert.match(workflow, /gh release download "\$release_tag"/);
   assert.match(workflow, /--pattern "CodexSetup-win-x64-\$RELEASE_VERSION\.zip"/);
   assert.match(workflow, /--pattern "Codex-win-x64-\$RELEASE_VERSION\.zip"/);
+  assert.match(workflow, /--pattern "CodexUpdater-win-x64\.zip"/);
   assert.match(workflow, /--pattern "windows-release-metadata\.json"/);
   assert.match(workflow, /--pattern '\*\.nupkg'/);
   assert.match(workflow, /--pattern 'RELEASES'/);
@@ -146,6 +147,7 @@ test("promotion workflow reconciles exactly the portable and installer ZIP asset
   const expectedAssets = [
     "CodexSetup-win-x64-${RELEASE_VERSION}.zip",
     "Codex-win-x64-${RELEASE_VERSION}.zip",
+    "CodexUpdater-win-x64.zip",
   ];
   for (const asset of expectedAssets) assert.ok(step.includes(`"${asset}"`));
   assert.doesNotMatch(step, /\.dmg|\.nupkg|RELEASES|\.exe|delta_path/i);

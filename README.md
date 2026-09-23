@@ -104,15 +104,18 @@ $env:CODEX_REBUILD_UPDATE_PROXY_FIRST = "1"
 
 ## 下载与安装
 
-进入 [最新版本下载页](https://github.com/AnLifeX/CodexDesktop-Rebuild/releases/latest)，Windows 发布通常包含两种文件：
+进入 [最新版本下载页](https://github.com/AnLifeX/CodexDesktop-Rebuild/releases/latest)，Windows 发布通常包含三种文件：
 
 - `CodexSetup-win-x64-<版本>.zip`：安装版。解压后运行其中的安装程序，推荐日常使用，并由项目内更新器管理后续升级。
+- [`CodexUpdater-win-x64.zip`](https://github.com/AnLifeX/CodexDesktop-Rebuild/releases/latest/download/CodexUpdater-win-x64.zip)：故障救援更新器，压缩包内只有 `CodexUpdater.exe`。仅供无法正常启动或无法使用应用内更新的旧版本用户。
 - `Codex-win-x64-<版本>.zip`：便携构建。解压后直接运行，适合临时使用和排查问题。
 
 > [!WARNING]
 > Windows 构建不是 OpenAI 官方签名版本，系统可能显示 SmartScreen 或来源未知提示。请只从本仓库 Releases 下载，并自行判断是否继续运行。
 
 从旧版本升级时，更新器会自动根据当前版本、残差链完整性和下载大小选择最合适的包，无需手动逐版安装。
+
+从本版本开始，安装包、full 包和 delta 包都包含 `CodexUpdater.exe`。正常安装或更新完成后，它会同步到 `%LOCALAPPDATA%\Codex\CodexUpdater.exe`，并随以后更新自动覆盖。若 Codex 无法启动，请先退出 Codex，再运行该文件；尚未内置该文件的历史版本只需下载上面的故障救援更新器，无需重新下载安装包。救援更新器同样通过 Squirrel 更新源选择 delta 或 full 包并完成安装。
 
 ## 本地构建
 

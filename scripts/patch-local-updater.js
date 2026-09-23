@@ -19,8 +19,8 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 9;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8];
+const LOCAL_UPDATER_CONTRACT_VERSION = 10;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";
@@ -212,6 +212,8 @@ function makeSquirrelLifecycleBlock(
           for(let currentManifest of currentManifests){
             fs.copyFileSync(path.join(appFolder,currentManifest),path.join(rootFolder,currentManifest));
           }
+          let bundledUpdater=path.join(appFolder,\`CodexUpdater.exe\`);
+          if(fs.existsSync(bundledUpdater))fs.copyFileSync(bundledUpdater,path.join(rootFolder,\`CodexUpdater.exe\`));
         }catch{}
       }
 ${shortcutCommandRunner}
@@ -221,12 +223,13 @@ ${shortcutCommandRunner}
             await runShortcutCommand([\`--removeShortcut\`,legacyExeName]);
           }
           await runShortcutCommand([\`--createShortcut\`,exeName]);
-        }else if(squirrelEvent===\`--squirrel-uninstall\`){
-          await runShortcutCommand([\`--removeShortcut\`,exeName]);
-          if(exeName.toLowerCase()!==legacyExeName.toLowerCase()){
-            await runShortcutCommand([\`--removeShortcut\`,legacyExeName]);
-          }
-        }
+         }else if(squirrelEvent===\`--squirrel-uninstall\`){
+           await runShortcutCommand([\`--removeShortcut\`,exeName]);
+           if(exeName.toLowerCase()!==legacyExeName.toLowerCase()){
+             await runShortcutCommand([\`--removeShortcut\`,legacyExeName]);
+           }
+           try{require(\`node:fs\`).rmSync(path.join(rootFolder,\`CodexUpdater.exe\`),{force:!0})}catch{}
+         }
       })().catch(e=>{try{console.warn('[CodexRebuildUpdater] shortcut lifecycle failed',e&&e.message?e.message:e)}catch{}}).finally(()=>app.quit());
     }catch(e){
       try{console.warn('[CodexRebuildUpdater] shortcut lifecycle failed',e&&e.message?e.message:e)}catch{}

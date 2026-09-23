@@ -404,6 +404,27 @@ function collectAdditionalFiles(appDirectory, exeName) {
   return additionalFiles;
 }
 
+function buildRecoveryUpdater(appDirectory) {
+  const windows = process.env.WINDIR || "C:\\Windows";
+  const compiler = [
+    path.join(windows, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+    path.join(windows, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
+  ].find(fs.existsSync);
+  if (!compiler) throw new Error(".NET Framework C# compiler was not found");
+
+  const output = path.join(appDirectory, "CodexUpdater.exe");
+  run(compiler, [
+    "/nologo",
+    "/target:exe",
+    `/win32icon:${path.join(PROJECT_ROOT, "resources", "electron.ico")}`,
+    `/out:${output}`,
+    path.join(PROJECT_ROOT, "scripts", "CodexUpdater.cs"),
+  ]);
+  fs.mkdirSync(path.join(PROJECT_ROOT, "out"), { recursive: true });
+  fs.copyFileSync(output, path.join(PROJECT_ROOT, "out", "CodexUpdater.exe"));
+  console.log("   [ok] built CodexUpdater.exe recovery updater");
+}
+
 function markSquirrelAware(appDirectory, exeName) {
   const exePath = path.join(appDirectory, exeName);
   if (!fs.existsSync(exePath)) {
@@ -485,6 +506,7 @@ async function main() {
   stripRootExecutableManifestDependencies(appDirectory);
   createLegacyExecutableAlias(appDirectory, primaryExe);
   markSquirrelAware(appDirectory, primaryExe);
+  buildRecoveryUpdater(appDirectory);
   const additionalFiles = collectAdditionalFiles(appDirectory, primaryExe);
   console.log(`-- additional root runtime entries: ${additionalFiles.length}`);
   const installerVersion = process.env.CODEX_REBUILD_INSTALLER_VERSION || getPatchedAppVersion();
