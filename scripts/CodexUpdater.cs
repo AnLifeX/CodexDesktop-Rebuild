@@ -18,7 +18,7 @@ internal static class CodexUpdater
         {
             if (!args.Contains("--temporary"))
             {
-                string temporary = Path.Combine(Path.GetTempPath(), "CodexUpdater-recovery.exe");
+                string temporary = Path.Combine(Path.GetTempPath(), "CodexUpdater-recovery-" + Guid.NewGuid().ToString("N") + ".exe");
                 File.Copy(Assembly.GetExecutingAssembly().Location, temporary, true);
                 Process.Start(new ProcessStartInfo(temporary, "--temporary") { UseShellExecute = true });
                 return 0;
@@ -27,11 +27,12 @@ internal static class CodexUpdater
             Console.Title = "Codex Recovery Updater";
             string root = FindInstallRoot();
             if (root == null) return Fail("Codex is not installed for the current user.");
-            if (IsCodexRunning())
+            while (IsCodexRunning(root))
             {
-                Console.WriteLine("Close Codex, then press Enter to continue.");
-                Console.ReadLine();
-                if (IsCodexRunning()) return Fail("Codex is still running.");
+                Console.WriteLine("Close Codex, then press Enter to retry. Type F to close it, or Q to quit.");
+                string choice = Console.ReadLine();
+                if (choice == null || choice.Equals("Q", StringComparison.OrdinalIgnoreCase)) return 1;
+                if (choice.Equals("F", StringComparison.OrdinalIgnoreCase)) IsCodexRunning(root, true);
             }
 
             string feed = Environment.GetEnvironmentVariable("CODEX_REBUILD_UPDATE_URL") ?? DefaultFeed;
@@ -70,9 +71,35 @@ internal static class CodexUpdater
         return File.Exists(Path.Combine(root, "Update.exe")) ? root : null;
     }
 
-    private static bool IsCodexRunning()
+    private static bool IsInstalledCodexPath(string root, string executable)
     {
-        return Process.GetProcessesByName("ChatGPT").Length > 0 || Process.GetProcessesByName("Codex").Length > 0;
+        string installRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
+        string path = Path.GetFullPath(executable);
+        return (string.Equals(Path.GetDirectoryName(path), installRoot, StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(Path.GetFileName(path), "ChatGPT.exe", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(Path.GetFileName(path), "Codex.exe", StringComparison.OrdinalIgnoreCase)))
+            || path.StartsWith(installRoot + Path.DirectorySeparatorChar + "app-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCodexRunning(string root, bool forceClose = false)
+    {
+        bool running = false;
+        foreach (Process process in Process.GetProcesses())
+            using (process)
+            {
+                string executable;
+                try { executable = process.MainModule.FileName; }
+                catch (InvalidOperationException) { continue; }
+                catch (System.ComponentModel.Win32Exception) { continue; }
+                if (!IsInstalledCodexPath(root, executable)) continue;
+                if (forceClose)
+                {
+                    try { process.Kill(); process.WaitForExit(5000); }
+                    catch (Exception error) { Console.Error.WriteLine("Could not close " + executable + ": " + error.Message); }
+                }
+                if (!process.HasExited) running = true;
+            }
+        return running;
     }
 
     private static int Fail(string message)
