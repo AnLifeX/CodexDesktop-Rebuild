@@ -212,6 +212,16 @@ test("macOS matrix locates consolidated structural roles and ignores token decoy
   }
 });
 
+test("accepts the current personal-access-token alternative in patched gates", () => {
+  for (const [fixture, oldGate, newGate] of [
+    [LATEST_FAST_MODE_FIXTURE, "a?.authMethod===`apikey`", "a?.authMethod===`apikey`||a?.authMethod===`personalAccessToken`"],
+    [LATEST_FAST_REQUEST_FIXTURE, "n!==`apikey`", "n!==`apikey`&&n!==`personalAccessToken`"],
+  ]) {
+    const patched = patchFastModeSource(fixture).code.replace(oldGate, newGate);
+    assert.equal(patchFastModeSource(patched).status, "already");
+  }
+});
+
 test("ignores requires_openai_auth-derived fast_mode flags and leaves model capability to built-in options", () => {
   const source =
     "function settings(auth,requirements){let allowed=auth===`chatgpt`&&requirements.featureRequirements.fast_mode!==!1;return allowed}";

@@ -1249,8 +1249,8 @@ test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appen
   const patched = patchWebviewMenuBarCode(source);
 
   assert.match(patched, /function codexRebuildUpdaterTitlebar\(\)/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-component:v9/);
-  assert.match(patched, /CodexRebuildLocalUpdater:titlebar-descriptor:v9/);
+  assert.ok(patched.includes(`CodexRebuildLocalUpdater:titlebar-component:v${LOCAL_UPDATER_CONTRACT_VERSION}`));
+  assert.ok(patched.includes(`CodexRebuildLocalUpdater:titlebar-descriptor:v${LOCAL_UPDATER_CONTRACT_VERSION}`));
   const menuRoot = patched.indexOf("children:[(0,Ji.jsx)(`button`,{className:i,children:r}),null");
   const attachment = patched.indexOf("/* CodexRebuildUpdaterTitlebar:descriptor:start */");
   assert.ok(menuRoot >= 0 && attachment > menuRoot, "updater must be attached to the modern menu root");
@@ -1400,14 +1400,14 @@ test("rejects stale or mismatched canonical updater block versions", () => {
 });
 
 test("migrates the v8 updater layers to SemVer rebuild support", () => {
-  assert.equal(LOCAL_UPDATER_CONTRACT_VERSION, 9);
+  assert.ok(LOCAL_UPDATER_CONTRACT_VERSION > 8);
   const current = applyLocalUpdaterPlan(makeCleanLocalUpdaterSources());
   const legacy = {
     packageSource: current.packageSource,
     files: Object.fromEntries(
       Object.entries(current.files).map(([file, source]) => [
         file,
-        source.replaceAll(":v9 */", ":v8 */"),
+        source.replaceAll(`:v${LOCAL_UPDATER_CONTRACT_VERSION} */`, ":v8 */"),
       ]),
     ),
   };
@@ -1620,6 +1620,18 @@ test("resolves only the live top-level early-bootstrap target", () => {
       runtimePath: ".vite/build/bootstrap-LIVE.js",
       viaEarlyBootstrap: true,
     },
+  );
+});
+
+test("resolves the runtime behind the async startup requirement", () => {
+  const files = {
+    ".vite/build/early-bootstrap.js":
+      "async function dead(){require(`./bootstrap-DEAD.js`)}async function o(){await startup();await Promise.resolve().then(()=>require(`./bootstrap-D2PJMYEh.js`))}o().catch(handleError)",
+    ".vite/build/bootstrap-D2PJMYEh.js": "require(`./src.js`);",
+  };
+  assert.equal(
+    resolveRuntimeBootstrap({ main: ".vite/build/early-bootstrap.js" }, (file) => files[file]).runtimePath,
+    ".vite/build/bootstrap-D2PJMYEh.js",
   );
 });
 

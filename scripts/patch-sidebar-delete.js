@@ -65,12 +65,35 @@ function findTrashIcon(source) {
     const initializer = prefix.match(/^function ([\w$]+)\(\)/)?.[1];
     const component = [...prefix.matchAll(/([\w$]+)=e=>/g)].at(-1)?.[1];
     if (initializer && component) return { initializer, component };
+    const svg = prefix.match(/([\w$]+)=`<svg[\s\S]*$/);
+    const path = svg && source.slice(marker, source.indexOf("`", marker)).match(/^([^"\r\n]+)"/)?.[1];
+    if (initializer && svg && path) return { initializer, path: `M10.6299 1.33496${path.slice(TRASH_PATH_PREFIX.length)}` };
   }
   throw new Error("official trash icon binding changed");
 }
 
 function patchHover(source, node, trash) {
   let code = source.slice(node.start, node.end);
+  if (code.includes("awaitBeforeOpen")) {
+    const props = /\{archive:([\w$]+),awaitBeforeOpen:/;
+    if (!props.test(code)) throw new Error("native sidebar action props changed");
+    code = code.replace(props, "{archive:$1,deleteAction:CodexDeleteAction,awaitBeforeOpen:");
+    const empty = /if\(([^;]+)\)return null;/;
+    if (!empty.test(code)) throw new Error("native sidebar empty-action guard changed");
+    code = code.replace(empty, (_match, condition) => `if(${condition}&&CodexDeleteAction==null)return null;`);
+    const actions = code.match(/let ([\w$]+);[^;]*?\?\(\1=\[\.\.\.[\w$]+,\.\.\.[\w$]+\]/)?.[1];
+    if (!actions) throw new Error("native sidebar action aggregation changed");
+    const afterAggregation = new RegExp(`:${actions}=([\\w$]+)\\[(\\d+)\\];let `);
+    if (!afterAggregation.test(code)) throw new Error("native sidebar action aggregation end changed");
+    const jsx = code.match(/icon:\(0,([\w$]+)\.jsx\)\(/)?.[1];
+    const intl = code.match(/=([\w$]+)\(\);if\(/)?.[1];
+    if (!jsx || !intl) throw new Error("native sidebar render bindings changed");
+    const icon = trash.component
+      ? `(0,${jsx}.jsx)(${trash.component},{})`
+      : `(0,${jsx}.jsx)(\`svg\`,{viewBox:\`0 0 20 20\`,fill:\`currentColor\`,children:(0,${jsx}.jsx)(\`path\`,{d:\`${trash.path}\`})})`;
+    return code.replace(afterAggregation,
+      (_match, cache, index) => `:${actions}=${cache}[${index}];${actions}=CodexDeleteAction==null?${actions}:[...${actions},{${MARKER},ariaLabel:${intl}.formatMessage({id:\`sidebarElectron.deleteThread\`,defaultMessage:\`Permanently delete\`}),icon:(${trash.initializer}(),${icon}),onClick:CodexDeleteAction.onSelect}];let `);
+  }
   const props = /\{archive:([\w$]+),primaryAction:([\w$]+),getMenuItems:([\w$]+),/;
   const propsMatch = code.match(props);
   if (!propsMatch) throw new Error("native sidebar action props changed");
@@ -99,13 +122,29 @@ function patchHover(source, node, trash) {
     `${MARKER},ariaLabel:CodexDeleteAction.message==null?\`Permanently delete\`:` +
     `${intl}.formatMessage(CodexDeleteAction.message),` +
     `buttonClassName:\`text-token-error-foreground hover:text-token-error-foreground\`,` +
-    `icon:(${trash.initializer}(),(0,${jsx}.jsx)(${trash.component},{})),` +
+    `icon:(${trash.initializer}(),${trash.component
+      ? `(0,${jsx}.jsx)(${trash.component},{})`
+      : `(0,${jsx}.jsx)(\`svg\`,{viewBox:\`0 0 20 20\`,fill:\`currentColor\`,children:(0,${jsx}.jsx)(\`path\`,{d:\`${trash.path}\`})})`}),` +
     `onClick:CodexDeleteAction.onSelect}]];`;
   return code.slice(0, aggregateMatch.index) + replacement + code.slice(aggregateEnd + 1);
 }
 
 function patchRow(source, node, hoverName) {
   let code = source.slice(node.start, node.end);
+  if (code.includes("awaitBeforeOpen")) {
+    const menu = code.match(/getMenuItems:([\w$]+)\|\|([\w$]+)\.disabled===!0\?\(\)=>?([\w$]+)\(`row-actions`\):void 0/);
+    if (!menu) throw new Error("native sidebar menu factory changed");
+    const [, workMode, props, menuFactory] = menu;
+    const condition = `!${workMode}&&${props}.disabled!==!0`;
+    const hoverCall = new RegExp(`\\)\\(${hoverName.replace(/[$]/g, "\\$")},\\{`);
+    if (!hoverCall.test(code)) throw new Error("native sidebar action rail call changed");
+    code = code.replace(hoverCall,
+      `)(${hoverName},{deleteAction:${condition}?{onSelect:()=>${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`);
+    const countProp = code.match(/additionalHoverActionCount:([\w$]+)/)?.[1];
+    const count = countProp && new RegExp(`\\b${countProp.replace(/[$]/g, "\\$")}=([^,]+),`);
+    if (!count?.test(code)) throw new Error("native sidebar hover count binding changed");
+    return code.replace(count, (_match, value) => `${countProp}=(${value})+(${condition}?1:0),`);
+  }
   const menu = /getMenuItems:([\w$]+)\?\(\)=>?([\w$]+)\(`row-actions`\):void 0/;
   const menuMatch = code.match(menu);
   if (!menuMatch) throw new Error("native sidebar menu factory changed");

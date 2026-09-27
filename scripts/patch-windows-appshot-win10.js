@@ -31,14 +31,23 @@ function patchMainSource(source) {
   if (source.includes("closeCaptureTransport=Number(process.getSystemVersion")) {
     return source.replace(SHARED_TRANSPORT_LOAD, "let e=c,n=loadHelperTransport(e.signal).then");
   }
-  const latest = source.includes(LATEST_FUNCTION_ANCHOR);
-  const anchor = latest ? LATEST_FUNCTION_ANCHOR : FUNCTION_ANCHOR;
-  const originalCapture = latest ? latestCapture(ORIGINAL_CAPTURE) : ORIGINAL_CAPTURE;
-  const patchedCapture = latest ? latestCapture(PATCHED_CAPTURE) : PATCHED_CAPTURE;
-  if (!source.includes(anchor)) {
+  const anchors = source.match(/function [\w$]+\(\{decorateApp:e=async\(\)=>null,loadHelperTransport:t\}\)/g) ?? [];
+  if (anchors.length !== 1) {
     throw new Error("Windows Appshot bridge function anchor changed");
   }
-  if (!source.includes(SHARED_TRANSPORT_LOAD) || !source.includes(originalCapture)) {
+  const anchor = anchors[0];
+  const captureMatches = [...source.matchAll(/try\{let t=await ([\w$]+)\(d\(\),o\),r=([\w$]+)\(e,f\.window,f\.decoration,i,s\),a=await ([\w$]+)\(t,f,r,o\)/g)];
+  const loggerMatches = [...source.matchAll(/\|\|([\w$]+)\(\)\.warning\(`Windows Appshot start failed`/g)];
+  if (captureMatches.length !== 1 || loggerMatches.length !== 1) {
+    throw new Error("Windows Appshot capture implementation changed");
+  }
+  const names = [captureMatches[0][1], captureMatches[0][2], captureMatches[0][3], loggerMatches[0][1]];
+  const rename = (capture) => capture.replaceAll("M7(", `${names[0]}(`)
+    .replaceAll("Zit(", `${names[1]}(`).replaceAll("v(", `${names[2]}(`)
+    .replaceAll("D7().warning", `${names[3]}().warning`);
+  const originalCapture = rename(ORIGINAL_CAPTURE);
+  const patchedCapture = rename(PATCHED_CAPTURE);
+  if (!source.includes(SHARED_TRANSPORT_LOAD) || source.split(originalCapture).length !== 2) {
     throw new Error("Windows Appshot capture implementation changed");
   }
   return source

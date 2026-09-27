@@ -35,3 +35,14 @@ test("patches the latest Windows Appshot bridge", () => {
   assert.match(patched, /r=Jit\(e,f\.window/);
   assert.equal(patchMainSource(patched), patched);
 });
+
+test("patches the renamed bridge and capture helper in the new upstream", () => {
+  const source =
+    "function oot({decorateApp:e=async()=>null,loadHelperTransport:t})" +
+    "let e=c,n=t(e.signal).thenxxx" +
+    ORIGINAL_CAPTURE.replaceAll("Zit(", "uot(").replaceAll("v(", "_(");
+  const patched = patchMainSource(source);
+  assert.match(patched, /await M7\(closeCaptureTransport\?loadHelperTransport\(o\):d\(\),o\)/);
+  assert.match(patched, /r=uot\(e,f\.window/);
+  assert.match(patched, /a=await _\(captureTransport,f,r,o\)/);
+});

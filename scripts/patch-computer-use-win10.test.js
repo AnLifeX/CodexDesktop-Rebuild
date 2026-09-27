@@ -229,6 +229,15 @@ test("accepts the latest runtime's preloaded marker-length context", () => {
   assert.equal(second.status, "already-patched");
 });
 
+test("uses the legacy fallback when the helper has no executable code cave", () => {
+  const source = createFixture({ directContext: true });
+  const { text } = readPeLayout(source);
+  source.writeUInt32LE(text.rawSize, text.headerOffset + 8);
+  const result = patchComputerUseBuffer(source);
+  assert.equal(result.status, "skipped-no-padding");
+  assert.deepEqual(result.buffer, source);
+});
+
 test("fails closed when the helper markers or QI instructions change", () => {
   assert.throws(
     () => patchComputerUseBuffer(createFixture({ duplicateMarker: true })),

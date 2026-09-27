@@ -2462,6 +2462,23 @@ function liveRuntimeBootstrapTargets(entrySource) {
       if (target) targets.push(target);
     }
   }
+  if (targets.length === 0) {
+    // The network-permission startup wrapper now awaits the same runtime load.
+    const called = new Set();
+    for (const statement of ast.body) {
+      if (statement.type !== "ExpressionStatement") continue;
+      walkAst(statement.expression, (node) => {
+        if (node.type === "CallExpression" && node.callee.type === "Identifier") called.add(node.callee.name);
+      });
+    }
+    for (const statement of ast.body) {
+      if (statement.type !== "FunctionDeclaration" || !statement.async || !called.has(statement.id?.name)) continue;
+      walkAst(statement.body, (node) => {
+        const target = bootstrapRequireTarget(node);
+        if (target) targets.push(target);
+      });
+    }
+  }
   return targets;
 }
 

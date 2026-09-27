@@ -146,14 +146,17 @@ function authComparisonOperand(node, source, operator, value) {
 function exactAuthPair(node, source, logicalOperator, comparisonOperator) {
   if (node?.type !== "LogicalExpression" || node.operator !== logicalOperator) return null;
   const terms = flattenLogical(node, logicalOperator);
-  if (terms.length !== 2) return null;
+  if (terms.length < 2 || terms.length > 3) return null;
   const chat = terms
     .map((term) => authComparisonOperand(term, source, comparisonOperator, CHATGPT_AUTH))
     .find(Boolean);
   const apiKey = terms
     .map((term) => authComparisonOperand(term, source, comparisonOperator, APIKEY_AUTH))
     .find(Boolean);
-  return chat != null && chat === apiKey ? chat : null;
+  if (chat == null || chat !== apiKey) return null;
+  if (terms.length === 3 && !terms.some((term) =>
+    authComparisonOperand(term, source, comparisonOperator, "personalAccessToken") === chat)) return null;
+  return chat;
 }
 
 function isRejectingConsequent(node) {
@@ -173,7 +176,8 @@ function exactRequestMarkerAfter(node, source, comments) {
     (comment) =>
       comment.type === "Block" &&
       (comment.start === node.end ||
-        (comment.start === node.end + 1 && source[node.end] === ")")) &&
+        (comment.start === node.end + 1 && source[node.end] === ")") ||
+        (comment.start >= node.start && comment.end <= node.end)) &&
       comment.value.trim() === "CodexRebuildFastModeRequestAuth",
   ).length === 1;
 }
@@ -416,7 +420,9 @@ function analyzeFastModeSource(source) {
       if (
         operands.get(CHATGPT_AUTH) != null &&
         operands.get(CHATGPT_AUTH) === operands.get(APIKEY_AUTH) &&
-        terms.length !== 2
+        (terms.length !== 2 && (terms.length !== 3 ||
+          !terms.some((term) => authComparisonOperand(term, source, "===", "personalAccessToken") === operands.get(CHATGPT_AUTH)))
+        )
       ) malformedAuthAlternative = true;
     });
   });

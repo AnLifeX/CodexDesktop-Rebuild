@@ -158,6 +158,7 @@ jobs:
 
       - run: node scripts/patch-all.js win
       - run: npm run build:win-x64
+      - run: node scripts/smoke-windows-app.js
 
       - name: Build full-only Windows installer
         if: inputs.skip_windows_delta == true
