@@ -169,10 +169,13 @@ function validateErrorContextTrailer(buffer, xrefOffset) {
   // push/pop after it. Registers can vary, so validate the complete instruction
   // family and the exact marker length while leaving allocation unconstrained.
   const directLengthSetup =
-    matchesBytes(buffer, xrefOffset - 12, [0x41, 0xb9]) &&
-    buffer.readUInt32LE(xrefOffset - 10) === ERROR_MARKER.length &&
-    matchesBytes(buffer, xrefOffset - 6, [0x48, 0x89]) &&
-    matchesBytes(buffer, xrefOffset - 3, [0x44, 0x89]);
+    (matchesBytes(buffer, xrefOffset - 12, [0x41, 0xb9]) &&
+      buffer.readUInt32LE(xrefOffset - 10) === ERROR_MARKER.length &&
+      matchesBytes(buffer, xrefOffset - 6, [0x48, 0x89]) &&
+      matchesBytes(buffer, xrefOffset - 3, [0x44, 0x89])) ||
+    (matchesBytes(buffer, xrefOffset - 11, [0x41, 0xb9]) &&
+      buffer.readUInt32LE(xrefOffset - 9) === ERROR_MARKER.length &&
+      matchesBytes(buffer, xrefOffset - 5, [0x48, 0x89, 0xf1, 0x89, 0xea]));
   const directTrailer =
     buffer[xrefOffset + 7] === 0xe8 &&
     [0x48, 0x49].includes(buffer[xrefOffset + 12]) &&
@@ -331,7 +334,8 @@ function patchComputerUseBuffer(input) {
     skipRva,
   });
   if (caveRelativeOffset + code.length > text.rawSize) {
-    throw new Error("Computer Use helper has no executable padding for compatibility code");
+    // ponytail: This helper has no code cave; the JS legacy screenshot fallback covers Win10.
+    return { buffer, status: "skipped-no-padding" };
   }
   const padding = buffer.subarray(caveOffset, caveOffset + code.length);
   if (padding.some((byte) => byte !== 0)) {
@@ -375,6 +379,10 @@ function main() {
   const result = patchComputerUseBuffer(source);
   if (result.status === "already-patched") {
     console.log(`  [ok] ${relPath(target)}: Windows 10 screenshot compatibility already patched`);
+    return;
+  }
+  if (result.status === "skipped-no-padding") {
+    console.log(`  [ok] ${relPath(target)}: no executable padding; legacy screenshot fallback handles Windows 10`);
     return;
   }
   if (args.includes("--check")) {

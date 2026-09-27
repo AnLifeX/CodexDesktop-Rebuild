@@ -143,6 +143,9 @@ jobs:
       - name: Build Windows portable app
         run: npm run build:win-x64
 
+      - name: Smoke test packaged Windows UI
+        run: node scripts/smoke-windows-app.js
+
       - name: Build Windows installer with required delta
         id: windows_delta
         timeout-minutes: 60
