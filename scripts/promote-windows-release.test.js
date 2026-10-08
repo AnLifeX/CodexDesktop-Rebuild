@@ -79,6 +79,7 @@ test("promotion workflow downloads exact draft Release assets and verifies sourc
   assert.match(workflow, /--pattern "windows-release-metadata\.json"/);
   assert.match(workflow, /--pattern '\*\.nupkg'/);
   assert.match(workflow, /--pattern 'RELEASES'/);
+  assert.match(workflow, /--pattern 'delta-chain\.json'/);
   assert.match(workflow, /test "\$\(jq -r '\.isDraft' <<<"\$release_json"\)" = true/);
   assert.match(workflow, /codex-rebuild-run-id:\$\{SOURCE_RUN_ID\}/);
   assert.match(workflow, /actions\/runs\/\$SOURCE_RUN_ID/);
@@ -123,6 +124,7 @@ test("promotion workflow publishes the validated Windows draft and feed staging 
   assert.match(workflow, /gh release edit "\$RELEASE_TAG" --draft=false --latest/);
   assert.match(workflow, /gh release upload "\$tag" artifacts\/update-feed\/\*\.nupkg --clobber/);
   assert.match(workflow, /gh release upload "\$tag" artifacts\/update-feed\/RELEASES --clobber/);
+  assert.match(workflow, /gh release upload "\$tag" artifacts\/update-feed\/delta-chain\.json --clobber/);
   assert.match(workflow, /name: Remove Windows update feed staging draft/);
   assert.match(
     workflow,
