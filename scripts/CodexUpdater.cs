@@ -78,12 +78,10 @@ internal static class CodexUpdater
                         {
                             string url = line.Substring(line.IndexOf(downloading) + downloading.Length).Trim();
                             string package = Path.GetFileName(new Uri(url).LocalPath);
-                            packages.Add(package);
+                            bool retry = !packages.Add(package);
                             stage = "Downloading update packages";
-                            reportedBytes = -1;
-                            reportedPercent = -1;
                             if (progressWidth > 0) { Console.WriteLine(); progressWidth = 0; }
-                            Console.WriteLine("Downloading " + package);
+                            Console.WriteLine((retry ? "Retrying " : "Downloading ") + package);
                         }
                         else if (line.Contains(repacking))
                         {
@@ -106,7 +104,11 @@ internal static class CodexUpdater
                             Console.WriteLine("Delta download failed; trying the full package...");
                         }
                         if (line.Contains("Failed downloading URL:"))
+                        {
                             lastDownloadError = line.Substring(line.IndexOf("Failed downloading URL:"));
+                            if (progressWidth > 0) { Console.WriteLine(); progressWidth = 0; }
+                            Console.WriteLine("Connection lost; waiting for a retry or full-package fallback...");
+                        }
                     }
 
                     if (packages.Count > 0)
@@ -121,6 +123,11 @@ internal static class CodexUpdater
                             if (packageSizes.TryGetValue(package, out size) && size > 0) total += size;
                             else sizesKnown = false;
                         }
+                        if (reportedBytes >= 0 && bytes < reportedBytes)
+                        {
+                            if (progressWidth > 0) { Console.WriteLine(); progressWidth = 0; }
+                            Console.WriteLine("Partial download was discarded; progress restarted.");
+                        }
                         int percent = sizesKnown ? (int)Math.Min(100, bytes * 100 / total) : -1;
                         if (!Console.IsOutputRedirected && (bytes != reportedBytes || progressWidth == 0))
                         {
@@ -129,7 +136,7 @@ internal static class CodexUpdater
                             progressWidth = progress.Length;
                         }
                         else if (Console.IsOutputRedirected &&
-                            (percent >= 0 && (reportedPercent < 0 || percent / 10 > reportedPercent / 10 || percent == 100 && reportedPercent != 100)
+                            (percent >= 0 && (reportedPercent < 0 || percent / 10 != reportedPercent / 10 || percent == 100 && reportedPercent != 100)
                              || percent < 0 && (reportedBytes < 0 || bytes / 10485760 > reportedBytes / 10485760)))
                             Console.WriteLine(FormatProgress(bytes, sizesKnown ? total : 0));
                         reportedBytes = bytes;
