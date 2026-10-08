@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("Codex Recovery Updater")]
 [assembly: AssemblyProduct("Codex Desktop Rebuild")]
@@ -42,19 +43,31 @@ internal static class CodexUpdater
             Console.WriteLine("Reading update feed...");
             var packageSizes = ReadPackageSizes(feed);
             string logPath = Path.Combine(root, "Squirrel-Update.log");
+            Process existingUpdate = FindRunningUpdater(root);
             long logPosition = File.Exists(logPath) ? new FileInfo(logPath).Length : 0;
+            if (existingUpdate != null) logPosition = Math.Max(0, logPosition - 65536);
             string pendingLog = "";
-            Console.WriteLine("Checking for updates...");
-            using (Process update = Process.Start(new ProcessStartInfo(updateExe, "--update=" + feed)
+            Console.WriteLine(existingUpdate == null ? "Checking for updates..." :
+                "Monitoring existing update (PID " + existingUpdate.Id + ")...");
+            IntPtr job = CreateKillOnCloseJob();
+            try
             {
-                UseShellExecute = false,
-            }))
-            {
-                string package = null;
+                using (Process update = existingUpdate ?? Process.Start(new ProcessStartInfo(updateExe, "--update=" + feed)
+                {
+                    UseShellExecute = false,
+                }))
+                {
+                if (!AssignProcessToJobObject(job, update.Handle))
+                {
+                    if (existingUpdate == null && !update.HasExited) update.Kill();
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not bind Update.exe to the updater window");
+                }
+                var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 string stage = "Checking for updates";
                 long reportedBytes = -1;
                 int reportedPercent = -1;
-                DateTime lastStatus = DateTime.UtcNow;
+                int progressWidth = 0;
+                string lastDownloadError = null;
                 do
                 {
                     foreach (string line in ReadNewLogLines(logPath, ref logPosition, ref pendingLog))
@@ -64,63 +77,71 @@ internal static class CodexUpdater
                         if (line.Contains(downloading))
                         {
                             string url = line.Substring(line.IndexOf(downloading) + downloading.Length).Trim();
-                            package = Path.GetFileName(new Uri(url).LocalPath);
-                            stage = "Downloading " + package;
+                            string package = Path.GetFileName(new Uri(url).LocalPath);
+                            packages.Add(package);
+                            stage = "Downloading update packages";
                             reportedBytes = -1;
                             reportedPercent = -1;
-                            Console.WriteLine(stage);
-                            lastStatus = DateTime.UtcNow;
+                            if (progressWidth > 0) { Console.WriteLine(); progressWidth = 0; }
+                            Console.WriteLine("Downloading " + package);
                         }
                         else if (line.Contains(repacking))
                         {
-                            package = null;
+                            packages.Clear();
                             stage = "Applying delta package";
+                            if (progressWidth > 0) { Console.WriteLine(); progressWidth = 0; }
                             Console.WriteLine(stage + " (this can take several minutes)...");
-                            lastStatus = DateTime.UtcNow;
                         }
                         else if (line.Contains("ApplyReleasesImpl: Writing files to app directory"))
                         {
-                            package = null;
+                            packages.Clear();
                             stage = "Installing application files";
+                            if (progressWidth > 0) { Console.WriteLine(); progressWidth = 0; }
                             Console.WriteLine(stage + "...");
-                            lastStatus = DateTime.UtcNow;
                         }
+                        else if (line.Contains("falling back to full updates"))
+                        {
+                            packages.Clear();
+                            if (progressWidth > 0) { Console.WriteLine(); progressWidth = 0; }
+                            Console.WriteLine("Delta download failed; trying the full package...");
+                        }
+                        if (line.Contains("Failed downloading URL:"))
+                            lastDownloadError = line.Substring(line.IndexOf("Failed downloading URL:"));
                     }
 
-                    if (package != null)
+                    if (packages.Count > 0)
                     {
-                        string packagePath = Path.Combine(root, "packages", package);
-                        if (File.Exists(packagePath))
+                        long bytes = 0, total = 0;
+                        bool sizesKnown = true;
+                        foreach (string package in packages)
                         {
-                            long bytes = new FileInfo(packagePath).Length;
-                            long total;
-                            if (packageSizes.TryGetValue(package, out total) && total > 0)
-                            {
-                                int percent = (int)Math.Min(100, bytes * 100 / total);
-                                if (reportedPercent < 0 || percent / 10 > reportedPercent / 10 || percent == 100 && reportedPercent != 100)
-                                {
-                                    Console.WriteLine("Downloaded {0}% ({1:F1}/{2:F1} MB)", percent,
-                                        bytes / 1048576.0, total / 1048576.0);
-                                    reportedPercent = percent;
-                                    lastStatus = DateTime.UtcNow;
-                                }
-                            }
-                            else if (reportedBytes < 0 || bytes / 10485760 > reportedBytes / 10485760)
-                            {
-                                Console.WriteLine("Downloaded {0:F1} MB", bytes / 1048576.0);
-                                reportedBytes = bytes;
-                                lastStatus = DateTime.UtcNow;
-                            }
+                            string packagePath = Path.Combine(root, "packages", package);
+                            if (File.Exists(packagePath)) bytes += new FileInfo(packagePath).Length;
+                            long size;
+                            if (packageSizes.TryGetValue(package, out size) && size > 0) total += size;
+                            else sizesKnown = false;
                         }
-                    }
-                    if ((DateTime.UtcNow - lastStatus).TotalSeconds >= 20)
-                    {
-                        Console.WriteLine(stage + "... still working");
-                        lastStatus = DateTime.UtcNow;
+                        int percent = sizesKnown ? (int)Math.Min(100, bytes * 100 / total) : -1;
+                        if (!Console.IsOutputRedirected && (bytes != reportedBytes || progressWidth == 0))
+                        {
+                            string progress = FormatProgress(bytes, sizesKnown ? total : 0);
+                            Console.Write("\r" + progress.PadRight(progressWidth));
+                            progressWidth = progress.Length;
+                        }
+                        else if (Console.IsOutputRedirected &&
+                            (percent >= 0 && (reportedPercent < 0 || percent / 10 > reportedPercent / 10 || percent == 100 && reportedPercent != 100)
+                             || percent < 0 && (reportedBytes < 0 || bytes / 10485760 > reportedBytes / 10485760)))
+                            Console.WriteLine(FormatProgress(bytes, sizesKnown ? total : 0));
+                        reportedBytes = bytes;
+                        reportedPercent = percent;
                     }
                 } while (!update.WaitForExit(1000));
-                if (update.ExitCode != 0) return Fail("Update.exe failed with exit code " + update.ExitCode + ".");
+                if (progressWidth > 0) Console.WriteLine();
+                if (update.ExitCode != 0) return Fail("Update.exe failed with exit code " + update.ExitCode +
+                    (lastDownloadError == null ? ". See " + logPath : ": " + lastDownloadError));
+                }
             }
+            finally { CloseHandle(job); }
             Console.WriteLine("Update completed.");
 
             string appExe = Directory.GetDirectories(root, "app-*")
@@ -183,6 +204,64 @@ internal static class CodexUpdater
         return running;
     }
 
+    private static bool IsInstalledUpdaterPath(string root, string executable)
+    {
+        return string.Equals(Path.GetFullPath(executable), Path.Combine(Path.GetFullPath(root), "Update.exe"),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Process FindRunningUpdater(string root)
+    {
+        foreach (Process process in Process.GetProcessesByName("Update"))
+        {
+            try
+            {
+                if (!process.HasExited && IsInstalledUpdaterPath(root, process.MainModule.FileName)) return process;
+            }
+            catch (InvalidOperationException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+            process.Dispose();
+        }
+        return null;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobLimits
+    {
+        public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass, SchedulingClass;
+        public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
+        public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
+        public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateJobObject(IntPtr securityAttributes, string name);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref JobLimits limits, uint length);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private static IntPtr CreateKillOnCloseJob()
+    {
+        IntPtr job = CreateJobObject(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        var limits = new JobLimits { LimitFlags = 0x2000 }; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(JobLimits))))
+        {
+            int error = Marshal.GetLastWin32Error();
+            CloseHandle(job);
+            throw new System.ComponentModel.Win32Exception(error);
+        }
+        return job;
+    }
+
     // The shipped updater targets .NET Framework, where HttpWebRequest is available without extra assemblies.
 #pragma warning disable
     private static Dictionary<string, long> ReadPackageSizes(string feed)
@@ -215,6 +294,16 @@ internal static class CodexUpdater
             if (parts.Length >= 3 && long.TryParse(parts[2], out size)) sizes[parts[1]] = size;
         }
         return sizes;
+    }
+
+    private static string FormatProgress(long bytes, long total)
+    {
+        if (total <= 0) return string.Format("Downloaded {0:F1} MB", bytes / 1048576.0);
+        int percent = (int)Math.Min(100, bytes * 100 / total);
+        int filled = percent * 30 / 100;
+        return string.Format("Downloading [{0}{1}] {2}% ({3:F1}/{4:F1} MB)",
+            new string('#', filled), new string('-', 30 - filled), percent,
+            bytes / 1048576.0, total / 1048576.0);
     }
 
     private static string[] ReadNewLogLines(string path, ref long position, ref string pending)

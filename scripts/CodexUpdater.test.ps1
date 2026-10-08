@@ -21,6 +21,32 @@ $sizes = $parseSizes.Invoke($null, [object[]]@("ABC Codex-1-delta.nupkg 2527973`
 if ($sizes['Codex-1-delta.nupkg'] -ne 2527973 -or $sizes['Codex-1.nupkg'] -ne 812534448) {
   throw 'Wrong RELEASES package sizes'
 }
+$isUpdater = $updater.GetMethod('IsInstalledUpdaterPath', [System.Reflection.BindingFlags]'NonPublic, Static')
+$rootUpdate = Join-Path $root 'Update.exe'
+$otherUpdate = Join-Path $env:WINDIR 'Update.exe'
+if (-not $isUpdater.Invoke($null, [object[]]@("$root", "$rootUpdate")) -or
+    $isUpdater.Invoke($null, [object[]]@("$root", "$otherUpdate"))) {
+  throw 'Wrong updater process scope'
+}
+$createJob = $updater.GetMethod('CreateKillOnCloseJob', [System.Reflection.BindingFlags]'NonPublic, Static')
+$assignJob = $updater.GetMethod('AssignProcessToJobObject', [System.Reflection.BindingFlags]'NonPublic, Static')
+$closeJob = $updater.GetMethod('CloseHandle', [System.Reflection.BindingFlags]'NonPublic, Static')
+$child = Start-Process -FilePath (Join-Path $env:WINDIR 'System32/ping.exe') -ArgumentList '127.0.0.1 -n 30' -WindowStyle Hidden -PassThru
+try {
+  $job = $createJob.Invoke($null, [object[]]@())
+  try {
+    if (-not $assignJob.Invoke($null, [object[]]@($job, $child.Handle))) { throw 'Could not assign test process to job' }
+  } finally {
+    $closeJob.Invoke($null, [object[]]@($job)) | Out-Null
+  }
+  if (-not $child.WaitForExit(5000)) { throw 'Closing the updater job left its child running' }
+} finally {
+  if (-not $child.HasExited) { $child.Kill() }
+  $child.Dispose()
+}
+$format = $updater.GetMethod('FormatProgress', [System.Reflection.BindingFlags]'NonPublic, Static')
+$bar = $format.Invoke($null, [object[]]@([long]1048576, [long]4194304))
+if ($bar -notmatch '\[#{7}-{23}\] 25% \(1\.0/4\.0 MB\)') { throw "Wrong progress bar: $bar" }
 
 $readLines = $updater.GetMethod('ReadNewLogLines', [System.Reflection.BindingFlags]'NonPublic, Static')
 $logFile = Join-Path ([IO.Path]::GetTempPath()) ("codex-updater-test-" + [guid]::NewGuid().ToString('N') + '.log')
