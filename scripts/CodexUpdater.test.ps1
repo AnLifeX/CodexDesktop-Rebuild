@@ -21,6 +21,9 @@ $sizes = $parseSizes.Invoke($null, [object[]]@("ABC Codex-1-delta.nupkg 2527973`
 if ($sizes['Codex-1-delta.nupkg'] -ne 2527973 -or $sizes['Codex-1.nupkg'] -ne 812534448) {
   throw 'Wrong RELEASES package sizes'
 }
+$latestFull = $updater.GetMethod('LatestFullPackage', [System.Reflection.BindingFlags]'NonPublic, Static')
+$package = $latestFull.Invoke($null, [object[]]@("AAA Codex-1-delta.nupkg 25`n0123456789abcdef0123456789abcdef01234567 Codex-2-full.nupkg 256`n"))
+if ($package.Name -ne 'Codex-2-full.nupkg' -or $package.Size -ne 256) { throw 'Wrong full package selected' }
 $isUpdater = $updater.GetMethod('IsInstalledUpdaterPath', [System.Reflection.BindingFlags]'NonPublic, Static')
 $rootUpdate = Join-Path $root 'Update.exe'
 $otherUpdate = Join-Path $env:WINDIR 'Update.exe'
@@ -62,4 +65,51 @@ try {
 } finally {
   Remove-Item -LiteralPath $logFile -ErrorAction SilentlyContinue
 }
-Write-Output 'CodexUpdater process scope, package sizes, and log reading passed'
+
+$downloadAttempt = $updater.GetMethod('DownloadAttempt', [System.Reflection.BindingFlags]'NonPublic, Static')
+$bytes = [byte[]](0..255)
+$socket = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+$socket.Start()
+$port = ([Net.IPEndPoint]$socket.LocalEndpoint).Port
+$socket.Stop()
+$server = Start-ThreadJob -ArgumentList $port, $bytes -ScriptBlock {
+  param($port, $bytes)
+  $listener = [Net.HttpListener]::new()
+  $listener.Prefixes.Add("http://127.0.0.1:$port/")
+  $listener.Start()
+  try {
+    for ($attempt = 0; $attempt -lt 2; $attempt++) {
+      $context = $listener.GetContext()
+      $response = $context.Response
+      if ($attempt -eq 0) {
+        $response.ContentLength64 = $bytes.Length
+        $response.OutputStream.Write($bytes, 0, 100)
+        $response.Abort()
+      } else {
+        if ($context.Request.Headers['Range'] -ne 'bytes=100-') { throw 'Resume request omitted byte range' }
+        $response.StatusCode = 206
+        $response.AddHeader('Content-Range', 'bytes 100-255/256')
+        $response.ContentLength64 = 156
+        $response.OutputStream.Write($bytes, 100, 156)
+        $response.Close()
+      }
+    }
+  } finally { $listener.Stop(); $listener.Close() }
+}
+$partial = Join-Path ([IO.Path]::GetTempPath()) ("codex-updater-test-" + [guid]::NewGuid().ToString('N') + '.partial')
+try {
+  Start-Sleep -Milliseconds 500
+  try { $downloadAttempt.Invoke($null, [object[]]@("http://127.0.0.1:$port/package.nupkg", "$partial", [long]256)) | Out-Null } catch {}
+  if ((Get-Item $partial).Length -ne 100) { throw 'Interrupted download did not retain partial data' }
+  $downloadAttempt.Invoke($null, [object[]]@("http://127.0.0.1:$port/package.nupkg", "$partial", [long]256)) | Out-Null
+  if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($partial)) -ne [Convert]::ToBase64String($bytes)) {
+    throw 'Resumed download content differs'
+  }
+  if (-not (Wait-Job $server -Timeout 5)) { throw 'Test HTTP server did not finish' }
+  Receive-Job $server -ErrorAction Stop | Out-Null
+} finally {
+  Stop-Job $server -ErrorAction SilentlyContinue
+  Remove-Job $server -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $partial -ErrorAction SilentlyContinue
+}
+Write-Output 'CodexUpdater process scope, feed parsing, resumable download, and log reading passed'
