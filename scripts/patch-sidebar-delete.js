@@ -86,7 +86,7 @@ function patchHover(source, node, trash) {
     const afterAggregation = new RegExp(`:${actions}=([\\w$]+)\\[(\\d+)\\];let `);
     if (!afterAggregation.test(code)) throw new Error("native sidebar action aggregation end changed");
     const jsx = code.match(/icon:\(0,([\w$]+)\.jsx\)\(/)?.[1];
-    const intl = code.match(/=([\w$]+)\(\);if\(/)?.[1];
+    const intl = code.match(/([\w$]+)=[\w$]+\(\);if\(/)?.[1];
     if (!jsx || !intl) throw new Error("native sidebar render bindings changed");
     const icon = trash.component
       ? `(0,${jsx}.jsx)(${trash.component},{})`
@@ -108,7 +108,7 @@ function patchHover(source, node, trash) {
   code = code.replace(empty, `if(${emptyMatch[1]}&&CodexDeleteAction==null)return null;`);
 
   const jsx = code.match(/icon:\(0,([\w$]+)\.jsx\)\(/)?.[1];
-  const intl = code.match(/=([\w$]+)\(\);if\(/)?.[1];
+  const intl = code.match(/([\w$]+)=[\w$]+\(\);if\(/)?.[1];
   if (!jsx || !intl) throw new Error("native sidebar render bindings changed");
   const aggregateMatch = code.match(
     /let ([\w$]+);(?=[^;]*?\[\.\.\.([\w$]+),\.\.\.([\w$]+)\])/,
@@ -194,9 +194,20 @@ function patchSidebarSource(source) {
   const markerCount = source.split(MARKER).length - 1;
   if (markerCount === 1) {
     const legacy = /deleteAction:[\w$]+\(`row-actions`\)\.find\(e=>e\.id===`delete-thread`\),/.test(source);
-    return legacy
-      ? { status: "patched", code: migrateRenderTimeMenuLookup(source) }
-      : { status: "already", code: source };
+    let code = legacy ? migrateRenderTimeMenuLookup(source) : source;
+    const { hover } = findOwnedFunctions(code, parse(code));
+    const body = code.slice(hover.start, hover.end);
+    const binding = body.match(/([\w$]+)=([\w$]+)\(\);if\(/);
+    const bad = binding && (body.includes(`ariaLabel:${binding[2]}.formatMessage(`)
+      ? `ariaLabel:${binding[2]}.formatMessage(`
+      : body.includes(`:${binding[2]}.formatMessage(CodexDeleteAction.message)`)
+        ? `:${binding[2]}.formatMessage(CodexDeleteAction.message)` : null);
+    if (bad) {
+      code = code.slice(0, hover.start) + body.replace(
+        bad, bad.replace(`${binding[2]}.formatMessage`, `${binding[1]}.formatMessage`),
+      ) + code.slice(hover.end);
+    }
+    return { status: code === source ? "already" : "patched", code };
   }
   if (markerCount !== 0) throw new Error(`sidebar delete marker count is ${markerCount}`);
   if (!source.includes("id:`delete-thread`")) {

@@ -21,6 +21,7 @@ test("adds only a hover action backed by the native delete item", () => {
   assert.doesNotMatch(first.code, /deleteAction:yt\(`row-actions`\)/);
   assert.doesNotMatch(first.code, /yt\(`row-actions`\)\.some/);
   assert.match(first.code, /onClick:CodexDeleteAction\.onSelect/);
+  assert.match(first.code, /:c\.formatMessage\(CodexDeleteAction\.message\)/);
   assert.match(first.code, /id:`thread-delete-action`/);
   assert.doesNotMatch(first.code, /delete-conversation|thread\/delete/);
   assert.equal(patchSidebarSource(first.code).status, "already");
@@ -38,6 +39,17 @@ test("migrates the render-time menu lookup from the previous patch", () => {
   assert.doesNotMatch(migrated.code, /deleteAction:yt\(`row-actions`\)/);
   assert.doesNotMatch(migrated.code, /yt\(`row-actions`\)\.some/);
   assert.equal(patchSidebarSource(migrated.code).status, "already");
+});
+
+test("repairs the hook function used as an intl value in an existing patch", () => {
+  const broken = patchSidebarSource(SOURCE).code.replace(
+    ":c.formatMessage(CodexDeleteAction.message)",
+    ":intl.formatMessage(CodexDeleteAction.message)",
+  );
+  const repaired = patchSidebarSource(broken);
+  assert.equal(repaired.status, "patched");
+  assert.match(repaired.code, /:c\.formatMessage\(CodexDeleteAction\.message\)/);
+  assert.equal(patchSidebarSource(repaired.code).status, "already");
 });
 
 test("requires the official delete menu item", () => {
@@ -59,5 +71,6 @@ test("adds the hover action to the new sidebar rail with inline SVG icons", () =
   assert.match(patched.code, /d:`M10\.6299 1\.33496rest`/);
   assert.match(patched.code, /\.find\(e=>e\.id===`delete-thread`\)\?\.onSelect\(\)/);
   assert.match(patched.code, /sidebarElectron\.deleteThread/);
+  assert.match(patched.code, /ariaLabel:l\.formatMessage\(\{id:`sidebarElectron\.deleteThread`/);
   assert.equal(patchSidebarSource(patched.code).status, "already");
 });
