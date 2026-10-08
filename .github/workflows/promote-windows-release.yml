@@ -69,7 +69,7 @@ jobs:
           gh release download "$release_tag" --dir artifacts/portable --pattern "Codex-win-x64-$RELEASE_VERSION.zip" --clobber
           gh release download "$release_tag" --dir artifacts/updater --pattern "CodexUpdater-win-x64.zip" --clobber
           gh release download "$release_tag" --dir artifacts/metadata --pattern "windows-release-metadata.json" --clobber
-          gh release download "$feed_staging_tag" --dir artifacts/update-feed --pattern '*.nupkg' --pattern 'RELEASES' --clobber
+          gh release download "$feed_staging_tag" --dir artifacts/update-feed --pattern '*.nupkg' --pattern 'RELEASES' --pattern 'delta-chain.json' --clobber
           release_json="$(gh release view "$release_tag" --json isDraft,assets,body)"
           feed_json="$(gh release view "$feed_staging_tag" --json isDraft,assets,body)"
           test "$(jq -r '.isDraft' <<<"$release_json")" = true
@@ -210,10 +210,11 @@ jobs:
           desired_assets="$(mktemp)"
           (
             find artifacts/update-feed -maxdepth 1 -type f -name '*.nupkg' -printf '%f\n'
-            printf 'RELEASES\n'
+            printf 'RELEASES\ndelta-chain.json\n'
           ) | sort > "$desired_assets"
           gh release upload "$tag" artifacts/update-feed/*.nupkg --clobber
           gh release upload "$tag" artifacts/update-feed/RELEASES --clobber
+          gh release upload "$tag" artifacts/update-feed/delta-chain.json --clobber
           gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r asset; do
             if ! grep -Fxq "$asset" "$desired_assets"; then
               gh release delete-asset "$tag" "$asset" -y
