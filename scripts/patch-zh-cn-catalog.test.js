@@ -381,7 +381,7 @@ test("translation specs cover the confirmed keyboard shortcut rows", () => {
   );
   const currentIds = new Set();
   for (const name of fs.readdirSync(assetsDir)) {
-    if (!/^app-initial-.*\.js$/.test(name)) continue;
+    if (!/^(?:app-initial|command-messages)-.*\.js$/.test(name)) continue;
     const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
     for (const match of source.matchAll(/id:`([^`]+)`,defaultMessage:`[^`]*`/g)) {
       if (expected.has(match[1])) currentIds.add(match[1]);
