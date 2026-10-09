@@ -36,6 +36,7 @@ const DIRECT_LITERAL_TRANSLATIONS = [
   ["System Status", "系统状态"],
 ];
 const NATIVE_MENU_MESSAGE_TRANSLATIONS = [
+  ["codex.command.toggleWorkspaceTabs", "Switch between Chat and tabs", "在聊天和标签页之间切换"],
   ["codex.aboutDialog.title", "About {appName}", "关于 {appName}"],
   ["electron.appMenu.app.quit", "Quit {appName}", "退出 {appName}"],
   ["electron.appMenu.edit.undo", "Undo", "撤销"],

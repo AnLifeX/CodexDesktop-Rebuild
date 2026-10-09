@@ -193,6 +193,11 @@ test("translation specs cover the confirmed visible UI gaps", () => {
 
 test("translation specs cover the model picker and import screenshot gaps", () => {
   const expected = new Map([
+    ["settings.nav.archived-chats", "归档聊天"],
+    ["codex.profileFooter.hidePet", "隐藏虚拟宠物"],
+    ["codex.profileFooter.showPet", "显示虚拟宠物"],
+    ["composer.mode.local.reasoning.max.label", "最高"],
+    ["composer.mode.local.reasoning.ultra.label", "超强"],
     ["composer.modelPicker.modelList.open.ariaLabel", "选择模型"],
     ["composer.modelPicker.modelList.heading", "选择模型"],
     [
@@ -211,6 +216,16 @@ test("translation specs cover the model picker and import screenshot gaps", () =
   for (const [messageId, translation] of expected) {
     assert.equal(ZH_CN_TRANSLATIONS.get(messageId), translation);
   }
+
+  const fixture =
+    'var c;c={"composer.mode.local.reasoning.max.label":`Max`,' +
+    '"composer.mode.local.reasoning.ultra.label":`Ultra`};export{c as default};';
+  const first = patchCatalogSource(fixture);
+  const catalog = extractCatalogMessages(first.code);
+  for (const [messageId, translation] of expected) {
+    assert.equal(catalog.get(messageId), translation);
+  }
+  assert.equal(patchCatalogSource(first.code).replacements.length, 0);
 });
 
 test("plan mode uses 计划 while subscription plans keep 套餐", () => {
