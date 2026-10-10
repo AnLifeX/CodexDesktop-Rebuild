@@ -14,6 +14,55 @@ const LATEST_FAST_MODE_FIXTURE =
   "function J(e){let t=(0,Y.c)(6),n=i(h),r=e?.hostId??n,a=I(r),o=a?.authMethod===`chatgpt`,c=a?.authMethod??null,l;t[0]!==r||t[1]!==c?(l={authMethod:c,hostId:r},t[0]=r,t[1]=c,t[2]=l):l=t[2];let{data:u,isPending:d}=s(j,l),f=!!a?.isLoading||o&&d,p=o&&!f&&u!=null&&u?.requirements?.featureRequirements?.fast_mode!==!1,m;return t[3]!==f||t[4]!==p?(m={isServiceTierAllowed:p,isLoading:f},t[3]=f,t[4]=p,t[5]=m):m=t[5],m}";
 const LATEST_FAST_REQUEST_FIXTURE =
   "async function T(e,t){let n=await x(e,t);if(n!==`chatgpt`)return!1;let r=await v(t,{priority:`critical`});return e.query.setData(g,{authMethod:n,hostId:t},r),r.requirements?.featureRequirements?.fast_mode!==!1}";
+const INDEPENDENT_ACCESS_FIXTURE =
+  "function KVi(e){let t=(0,qVi.c)(10),n=G(Li),r=e?.hostId??n,i=BYe(r),a=i?.authMethod===`chatgpt`||i?.authMethod===`personalAccessToken`,o=i?.authMethod??null,s;t[0]!==r||t[1]!==o?(s={authMethod:o,hostId:r},t[0]=r,t[1]=o,t[2]=s):s=t[2];let{data:c,isPending:l}=Zs(Hd,s),u=!!i?.isLoading||a&&l,d;t[3]!==c||t[4]!==u||t[5]!==a?(d=a&&!u&&c!=null?oee(c):null,t[3]=c,t[4]=u,t[5]=a,t[6]=d):d=t[6];let f=d,p;return t[7]!==u||t[8]!==f?(p={serviceTierAccess:f,isLoading:u},t[7]=u,t[8]=f,t[9]=p):p=t[9],p}" +
+  "async function bga(e,t){let n=await _ga(e,t);if(n!==`chatgpt`&&n!==`personalAccessToken`)return null;let r=await KPe(e,t,{priority:`critical`});return e.query.setData(Hd,{authMethod:n,hostId:t},r),oee(r)}";
+
+test("patches upstream 26.1007 independent access without changing model tier options", async () => {
+  const catalog = "function tiers(model,access){return model.serviceTiers.filter(t=>access[t])}";
+  const candidate = {
+    path: "webview/assets/app-initial-new.js", fileName: "app-initial-new.js",
+    source: INDEPENDENT_ACCESS_FIXTURE + catalog,
+  };
+  const first = planFastModePlatform({ platform: "win", candidates: [candidate] });
+  assert.equal(first.writes.length, 2);
+  assert.equal(first.writes[0].result.code, first.writes[1].result.code);
+  const { code, counts } = first.writes[0].result;
+  assert.deepEqual(counts, { patchable: 2, already: 0, total: 2 });
+  assert.ok(code.endsWith(catalog));
+  const { settings, request, tiers } = Function(`${code};return {settings:KVi,request:bga,tiers}`)();
+  const access = { fast: true, ultrafast: true };
+  assert.deepEqual(settings(), { serviceTierAccess: access, isLoading: false });
+  // All original auth/query dependencies are undefined; neither gate may call them.
+  assert.deepEqual(await request({}, "local"), access);
+  assert.deepEqual(tiers({ serviceTiers: ["fast"] }, access), ["fast"]);
+  assert.deepEqual(tiers({ serviceTiers: ["fast", "ultrafast"] }, access), ["fast", "ultrafast"]);
+  const second = planFastModePlatform({ platform: "win", candidates: [{ ...candidate, source: code }] });
+  assert.deepEqual(second.writes[0].result.counts, { patchable: 0, already: 2, total: 2 });
+  assert.equal(second.writes[0].result.code, code);
+  assert.throws(() => planFastModePlatform({ platform: "win", candidates: [{
+    ...candidate, source: code.replace("ultrafast:!0", "ultrafast:!1"),
+  }] }), /unrestricted body|owned-malformed/i);
+});
+
+test("rejects unknown independent-access request shapes before writing", () => {
+  for (const source of [
+    INDEPENDENT_ACCESS_FIXTURE.replace("oee(r)", "other(r)"),
+    INDEPENDENT_ACCESS_FIXTURE.replace("return null;", "return true;"),
+    INDEPENDENT_ACCESS_FIXTURE.replace("hostId:t},r)", "hostId:t},other)"),
+    INDEPENDENT_ACCESS_FIXTURE.replace("n!==`personalAccessToken`", "n!==`personalAccessToken`&&n!==`apikey`"),
+    INDEPENDENT_ACCESS_FIXTURE + INDEPENDENT_ACCESS_FIXTURE,
+  ]) {
+    const writes = [];
+    assert.throws(() => executeFastModePlatforms({
+      platformInputs: [{ platform: "win", candidates: [{
+        path: "app-initial.js", fileName: "app-initial.js", source,
+      }] }],
+      writeFile: (...args) => writes.push(args),
+    }), /fast-request|fast-settings|exact candidates|owned-malformed/i);
+    assert.equal(writes.length, 0);
+  }
+});
 
 test("removes the latest settings auth and account-query gates and is idempotent", () => {
   assert.equal(
