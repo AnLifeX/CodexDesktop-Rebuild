@@ -15,7 +15,7 @@ const LATEST_FAST_MODE_FIXTURE =
 const LATEST_FAST_REQUEST_FIXTURE =
   "async function T(e,t){let n=await x(e,t);if(n!==`chatgpt`)return!1;let r=await v(t,{priority:`critical`});return e.query.setData(g,{authMethod:n,hostId:t},r),r.requirements?.featureRequirements?.fast_mode!==!1}";
 
-test("patches the latest fast_mode API-key auth gate exactly once and is idempotent", () => {
+test("removes the latest settings auth and account-query gates and is idempotent", () => {
   assert.equal(
     typeof patchFastModeSource,
     "function",
@@ -27,10 +27,11 @@ test("patches the latest fast_mode API-key auth gate exactly once and is idempot
   assert.deepEqual(first.counts, { patchable: 1, already: 0, total: 1 });
   assert.match(
     first.code,
-    /\(a\?\.authMethod===`chatgpt`\|\|a\?\.authMethod===`apikey`\)/,
+    /return \{isServiceTierAllowed:!0,isLoading:!1\}\/\* CodexRebuildFastModeSettingsUnrestricted \*\//,
   );
   assert.match(first.code, /CodexRebuildFastModeModelCapabilityOnly/);
   assert.doesNotMatch(first.code, /featureRequirements\?\.fast_mode/);
+  assert.doesNotMatch(first.code, /authMethod|isPending|s\(j,l\)/);
 
   const second = patchFastModeSource(first.code);
   assert.equal(second.status, "already");
@@ -44,9 +45,9 @@ test("patches the latest request-time fast_mode auth gate and remains idempotent
   assert.deepEqual(first.counts, { patchable: 1, already: 0, total: 1 });
   assert.match(
     first.code,
-    /if\(\(n!==`chatgpt`&&n!==`apikey`\)\/\* CodexRebuildFastModeRequestAuth \*\/\)return!1/,
+    /return !0\/\* CodexRebuildFastModeRequestUnrestricted \*\//,
   );
-  assert.match(first.code, /return e\.query\.setData\([^)]+\),!0\/\* CodexRebuildFastModeModelCapabilityOnly \*\//);
+  assert.doesNotMatch(first.code, /await|query\.setData|chatgpt/);
   assert.doesNotMatch(first.code, /featureRequirements\?\.fast_mode/);
 
   const second = patchFastModeSource(first.code);
@@ -55,7 +56,7 @@ test("patches the latest request-time fast_mode auth gate and remains idempotent
   assert.equal(second.code, first.code);
 });
 
-test("request-time fast_mode authorization still rejects non-OpenAI auth kinds", () => {
+test("request-time service tiers accept empty auth and never fetch account requirements", () => {
   const source =
     "function T(n,requirements){if(n!==`chatgpt`)return!1;return requirements?.featureRequirements?.fast_mode!==!1}";
   const { code } = patchFastModeSource(source);
@@ -63,9 +64,15 @@ test("request-time fast_mode authorization still rejects non-OpenAI auth kinds",
 
   assert.equal(requestFastMode("chatgpt", { featureRequirements: { fast_mode: false } }), true);
   assert.equal(requestFastMode("apikey", { featureRequirements: { fast_mode: false } }), true);
-  assert.equal(requestFastMode("amazonBedrock"), false);
-  assert.equal(requestFastMode("copilot"), false);
-  assert.equal(requestFastMode(null), false);
+  assert.equal(requestFastMode("amazonBedrock"), true);
+  assert.equal(requestFastMode("copilot"), true);
+  assert.equal(requestFastMode(null), true);
+  assert.equal(requestFastMode(undefined), true);
+  assert.equal(requestFastMode("personalAccessToken"), true);
+  // The original dependencies are deliberately undefined: neither auth nor
+  // requirements endpoints may run when deciding a tier for a request.
+  const request = Function(`${patchFastModeSource(LATEST_FAST_REQUEST_FIXTURE).code};return T`)();
+  return assert.doesNotReject(() => request({}, "local"));
 });
 
 test("rejects a third settings auth alternative", () => {
@@ -212,13 +219,32 @@ test("macOS matrix locates consolidated structural roles and ignores token decoy
   }
 });
 
-test("accepts the current personal-access-token alternative in patched gates", () => {
+test("upgrades installed API-key and personal-access-token patches", () => {
   for (const [fixture, oldGate, newGate] of [
-    [LATEST_FAST_MODE_FIXTURE, "a?.authMethod===`apikey`", "a?.authMethod===`apikey`||a?.authMethod===`personalAccessToken`"],
-    [LATEST_FAST_REQUEST_FIXTURE, "n!==`apikey`", "n!==`apikey`&&n!==`personalAccessToken`"],
+    [LATEST_FAST_MODE_FIXTURE, "a?.authMethod===`chatgpt`", "(a?.authMethod===`chatgpt`||a?.authMethod===`apikey`)||a?.authMethod===`personalAccessToken`"],
+    [LATEST_FAST_REQUEST_FIXTURE, "n!==`chatgpt`", "(n!==`chatgpt`&&n!==`apikey`)/* CodexRebuildFastModeRequestAuth */&&n!==`personalAccessToken`"],
   ]) {
-    const patched = patchFastModeSource(fixture).code.replace(oldGate, newGate);
-    assert.equal(patchFastModeSource(patched).status, "already");
+    const oldPatch = fixture.replace(oldGate, newGate)
+      .replace(/(?:u\?|r)\.requirements\?\.featureRequirements\?\.fast_mode!==!1/,
+        "!0/* CodexRebuildFastModeModelCapabilityOnly */");
+    const result = patchFastModeSource(oldPatch);
+    assert.equal(result.status, "patched");
+    assert.doesNotMatch(result.code, /authMethod|personalAccessToken|featureRequirements/);
+    assert.equal(patchFastModeSource(result.code).status, "already");
+  }
+});
+
+test("settings accept empty auth without waiting for account-only queries", () => {
+  const settings = Function(`${patchFastModeSource(LATEST_FAST_MODE_FIXTURE).code};return J`)();
+  assert.deepEqual(settings({ hostId: "local" }), {
+    isServiceTierAllowed: true, isLoading: false,
+  });
+});
+
+test("rejects corrupted unrestricted settings and request bodies", () => {
+  for (const fixture of [LATEST_FAST_MODE_FIXTURE, LATEST_FAST_REQUEST_FIXTURE]) {
+    const patched = patchFastModeSource(fixture).code;
+    assert.throws(() => patchFastModeSource(patched.replace("!0", "!1")), /postcondition/);
   }
 });
 
@@ -230,11 +256,13 @@ test("ignores requires_openai_auth-derived fast_mode flags and leaves model capa
   const remoteDisabled = { featureRequirements: { fast_mode: false } };
   assert.equal(settings("chatgpt", remoteDisabled), true);
   assert.equal(settings("apikey", remoteDisabled), true);
+  assert.equal(settings(null, remoteDisabled), true);
 
   const visible = (allowed, model) =>
     allowed && model.serviceTierOptions.some((option) => option.iconKind === "fast");
   assert.equal(visible(true, { serviceTierOptions: [{ iconKind: "fast" }] }), true);
   assert.equal(visible(true, { serviceTierOptions: [{ iconKind: "standard" }] }), false);
+  assert.equal(visible(true, { serviceTierOptions: [{ iconKind: "ultrafast" }] }), false);
   assert.doesNotMatch(code, /gpt-?5|mini/i, "model names must remain owned by the built-in catalog");
 });
 
@@ -257,8 +285,8 @@ test("macOS supports settings and request roles consolidated into one bundle", (
   );
   assert.equal(writes.length, 1, "a consolidated bundle must be committed only once");
   const patched = writes[0][1];
-  assert.match(patched, /authMethod===`chatgpt`\|\|a\?\.authMethod===`apikey`/);
-  assert.match(patched, /n!==`chatgpt`&&n!==`apikey`/);
+  assert.match(patched, /CodexRebuildFastModeSettingsUnrestricted/);
+  assert.match(patched, /CodexRebuildFastModeRequestUnrestricted/);
 
   const idempotentWrites = [];
   const second = executeFastModePlatforms({

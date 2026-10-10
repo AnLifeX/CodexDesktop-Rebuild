@@ -1,11 +1,8 @@
 #!/usr/bin/env node
 /**
- * Post-build patch: expose Fast mode according to the selected model.
- *
- * API-key auth is accepted alongside ChatGPT auth, while the remote
- * featureRequirements.fast_mode flag (derived from requires_openai_auth) is
- * removed as an authorization gate. The existing built-in model/service-tier
- * options remain responsible for whether Fast is shown for a selected model.
+ * Post-build patch: expose service tiers according to the selected model.
+ * Local auth and remote account requirements do not gate the selector or
+ * requests. The built-in model/service-tier catalog still owns the options.
  */
 const fs = require("fs");
 const path = require("path");
@@ -20,6 +17,10 @@ const CHATGPT_AUTH = "chatgpt";
 const APIKEY_AUTH = "apikey";
 const REQUEST_AUTH_MARKER = "/* CodexRebuildFastModeRequestAuth */";
 const MODEL_CAPABILITY_MARKER = "/* CodexRebuildFastModeModelCapabilityOnly */";
+const UNRESTRICTED_MARKERS = new Map([
+  ["fast_mode_settings_auth_gate", "/* CodexRebuildFastModeSettingsUnrestricted */"],
+  ["fast_mode_request_auth_gate", "/* CodexRebuildFastModeRequestUnrestricted */"],
+]);
 const FAST_MODE_CONTRACT_IDS = [
   "fast_mode_settings_auth_gate",
   "fast_mode_request_auth_gate",
@@ -313,6 +314,21 @@ function collectAlreadyPatchedGates(ast, source, comments) {
   walk(ast, (node, parent) => {
     if (!isFunctionNode(node)) return;
     const fnSrc = sourceFor(source, node);
+    for (const [id, marker] of UNRESTRICTED_MARKERS) {
+      if (!fnSrc.includes(marker)) continue;
+      const booleanBody = unrestrictedBody(id, false);
+      const settingsBody = unrestrictedBody(id, true);
+      const compact = (body) => body.replace(/\s/g, "").replace(/;(?=\}$)/, "");
+      const body = compact(sourceFor(source, node.body));
+      if (body !== compact(booleanBody) &&
+          (id !== "fast_mode_settings_auth_gate" || body !== compact(settingsBody))) {
+        throw new Error(`fast_mode ${id} unrestricted body postcondition is malformed`);
+      }
+      addPatch(already, {
+        id, targetStart: node.start, start: node.body.start, unrestricted: true,
+      });
+      return;
+    }
     if (!fnSrc.includes("CodexRebuildFastModeModelCapabilityOnly")) return;
     const capabilityComments = comments.filter(
       (comment) =>
@@ -355,6 +371,13 @@ function collectAlreadyPatchedGates(ast, source, comments) {
     });
   });
   return already;
+}
+
+function unrestrictedBody(id, returnsSettings) {
+  const result = returnsSettings
+    ? "{isServiceTierAllowed:!0,isLoading:!1}"
+    : "!0";
+  return `{return ${result}${UNRESTRICTED_MARKERS.get(id)}${MODEL_CAPABILITY_MARKER}}`;
 }
 
 function analyzeFastModeSource(source) {
@@ -429,6 +452,33 @@ function analyzeFastModeSource(source) {
   if (malformedAuthAlternative) {
     throw new Error("fast_mode settings auth postcondition has extra alternatives");
   }
+  // Upgrade both upstream and older patches. Removing only the auth comparison
+  // still leaves the selector waiting for an account-only requirements query.
+  const legacyTargets = new Map(
+    [...patches, ...already.filter((target) => !target.unrestricted)]
+      .map((target) => [`${target.id}:${target.targetStart}`, target]),
+  );
+  const functions = new Map();
+  walk(ast, (node) => {
+    if (isFunctionNode(node)) functions.set(node.start, node);
+  });
+  patches.splice(0, patches.length);
+  for (const target of legacyTargets.values()) {
+    const fn = functions.get(target.targetStart);
+    let returnsSettings = false;
+    walkFunctionContract(fn, (node) => {
+      if (node.type === "Property" &&
+          (node.key.name === "isServiceTierAllowed" ||
+           isStringLiteral(node.key, "isServiceTierAllowed"))) returnsSettings = true;
+    });
+    patches.push({
+      id: target.id, targetStart: target.targetStart,
+      start: fn.body.start, end: fn.body.end,
+      replacement: unrestrictedBody(target.id, returnsSettings),
+      original: sourceFor(source, fn.body),
+    });
+  }
+  already.splice(0, already.length, ...already.filter((target) => target.unrestricted));
   const patchTargets = new Map(
     patches.map((target) => [`${target.id}:${target.targetStart}`, target]),
   );
@@ -555,6 +605,10 @@ function roleMarkerEvidence(source, targetId) {
   let markerCount = 0;
   walk(ast, (node) => {
     if (!isFunctionNode(node)) return;
+    if (sourceFor(source, node).includes(UNRESTRICTED_MARKERS.get(targetId))) {
+      markerCount += 1;
+      return;
+    }
     let hasFastModeFeatureAccess = false;
     let hasRoleAuthGate = false;
     walkFunctionContract(node, (child) => {
@@ -790,7 +844,8 @@ function main() {
       const isNamedWindowsTarget = [...FAST_MODE_FILE_PATTERNS.values()].some(
         (pattern) => pattern.test(f),
       );
-      if (plat === "win" && !isNamedWindowsTarget && !src.includes("fast_mode")) {
+      if (plat === "win" && !isNamedWindowsTarget &&
+          !src.includes("fast_mode") && !src.includes("CodexRebuildFastMode")) {
         continue;
       }
       candidates.push({ platform: plat, path: fp, fileName: f, source: src });
