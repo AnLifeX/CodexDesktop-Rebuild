@@ -80,7 +80,10 @@ jobs:
           grep -Fq "<!-- codex-rebuild-run-id:${SOURCE_RUN_ID} -->" <<<"$(jq -r '.body' <<<"$feed_json")"
           run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$SOURCE_RUN_ID")"
           test "$(jq -r '.conclusion' <<<"$run_json")" = success
-          test "$(jq -r '.path' <<<"$run_json")" = ".github/workflows/build.yml"
+          case "$(jq -r '.path' <<<"$run_json")" in
+            .github/workflows/build.yml|.github/workflows/sync.yml) ;;
+            *) echo "Source run must be a successful Windows build workflow" >&2; exit 1 ;;
+          esac
 
       - name: Resolve Windows installer version
         id: installer_artifacts

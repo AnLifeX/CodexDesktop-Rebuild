@@ -83,7 +83,8 @@ test("promotion workflow downloads exact draft Release assets and verifies sourc
   assert.match(workflow, /test "\$\(jq -r '\.isDraft' <<<"\$release_json"\)" = true/);
   assert.match(workflow, /codex-rebuild-run-id:\$\{SOURCE_RUN_ID\}/);
   assert.match(workflow, /actions\/runs\/\$SOURCE_RUN_ID/);
-  assert.match(workflow, /test "\$\(jq -r '\.path' <<<"\$run_json"\)" = "\.github\/workflows\/build\.yml"/);
+  assert.match(workflow, /test "\$\(jq -r '\.conclusion' <<<"\$run_json"\)" = success/);
+  assert.match(workflow, /case "\$\(jq -r '\.path' <<<"\$run_json"\)" in\n\s+\.github\/workflows\/build\.yml\|\.github\/workflows\/sync\.yml\) ;;\n\s+\*\) .*exit 1 ;;\n\s+esac/);
   assert.doesNotMatch(workflow, /Codex-mac|\.dmg|build-mac/i);
 });
 
