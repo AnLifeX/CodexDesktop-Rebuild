@@ -41,19 +41,19 @@ const MARKERS = [
     id: "fast-mode",
     contract: "fast",
     file: "webview/assets/use-service-tier-settings-fixture.js",
-    text: "const modelCapabilityOnly = !0/* CodexRebuildFastModeModelCapabilityOnly */;",
+    text: "function settings(){return {isServiceTierAllowed:!0,isLoading:!1}/* CodexRebuildFastModeSettingsUnrestricted */",
   },
   {
     id: "fast-api-key-authorization",
     contract: "fast",
     file: "webview/assets/use-service-tier-settings-fixture.js",
-    text: "const fastAllowed = authMethod === `chatgpt` || authMethod === `apikey`;",
+    text: "/* CodexRebuildFastModeModelCapabilityOnly */}",
   },
   {
     id: "fast-request-api-key-authorization",
     contract: "fast",
     file: "webview/assets/read-service-tier-for-request-fixture.js",
-    text: "async function readFast(authMethod) { if(authMethod !== `chatgpt` && authMethod !== `apikey`/* CodexRebuildFastModeRequestAuth */) return !1; return !0/* CodexRebuildFastModeModelCapabilityOnly */; }",
+    text: "async function readFast(authMethod){return !0/* CodexRebuildFastModeRequestUnrestricted *//* CodexRebuildFastModeModelCapabilityOnly */}",
   },
   {
     id: "browser-availability",
@@ -378,9 +378,7 @@ function writeMarkerFile(fixture, relativeFile) {
   if (markers.length === 0) return;
 
   let source = markers.map((marker) => marker.text).join("\n");
-  if (relativeFile === "webview/assets/use-service-tier-settings-fixture.js") {
-    source = `function fastSettings(authMethod, requirements) {\n${source}\n}`;
-  } else if (relativeFile === ".vite/build/main-features.js") {
+  if (relativeFile === ".vite/build/main-features.js") {
     const browserValue = fixture.includedMarkers.has("browser-availability")
       ? "!0"
       : "!1";
@@ -458,6 +456,15 @@ test("fast rejects unrelated same-bundle authorization evidence", (t) => {
   );
 });
 
+test("fast rejects the older patch that still requires account auth", (t) => {
+  const fixture = createFixture(t);
+  writeText(path.join(fixture.asarRoot, "webview/assets/use-service-tier-settings-fixture.js"),
+    "function settings(auth){return (auth===`chatgpt`||auth===`apikey`)&&!0/* CodexRebuildFastModeModelCapabilityOnly */}");
+  writeText(path.join(fixture.asarRoot, "webview/assets/read-service-tier-for-request-fixture.js"),
+    "function request(auth){if((auth!==`chatgpt`&&auth!==`apikey`)/* CodexRebuildFastModeRequestAuth */)return!1;return!0/* CodexRebuildFastModeModelCapabilityOnly */}");
+  assert.throws(() => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION), /patchable/);
+});
+
 test("fast rejects a detached request authorization marker", (t) => {
   const fixture = createFixture(t, {
     omitMarkers: ["fast-request-api-key-authorization"],
@@ -529,8 +536,8 @@ test("fast rejects a non-exact request marker comment", (t) => {
   const source = fs
     .readFileSync(requestPath, "utf8")
     .replace(
-      "/* CodexRebuildFastModeRequestAuth */",
-      "/* bogus CodexRebuildFastModeRequestAuth evidence */",
+      "/* CodexRebuildFastModeRequestUnrestricted */",
+      "/* bogus CodexRebuildFastModeRequestUnrestricted evidence */",
     );
   writeText(requestPath, source);
 
