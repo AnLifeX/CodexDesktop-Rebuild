@@ -144,17 +144,17 @@ function authComparisonOperand(node, source, operator, value) {
   return null;
 }
 
-function exactAuthPair(node, source, logicalOperator, comparisonOperator) {
+function exactAuthPair(node, source, logicalOperator, comparisonOperator, secondAuth = APIKEY_AUTH) {
   if (node?.type !== "LogicalExpression" || node.operator !== logicalOperator) return null;
   const terms = flattenLogical(node, logicalOperator);
   if (terms.length < 2 || terms.length > 3) return null;
   const chat = terms
     .map((term) => authComparisonOperand(term, source, comparisonOperator, CHATGPT_AUTH))
     .find(Boolean);
-  const apiKey = terms
-    .map((term) => authComparisonOperand(term, source, comparisonOperator, APIKEY_AUTH))
+  const second = terms
+    .map((term) => authComparisonOperand(term, source, comparisonOperator, secondAuth))
     .find(Boolean);
-  if (chat == null || chat !== apiKey) return null;
+  if (chat == null || chat !== second) return null;
   if (terms.length === 3 && !terms.some((term) =>
     authComparisonOperand(term, source, comparisonOperator, "personalAccessToken") === chat)) return null;
   return chat;
@@ -309,6 +309,58 @@ function collectPatches(ast, source) {
   return patches;
 }
 
+function collectServiceTierAccessTargets(ast, source) {
+  if (!source.includes("serviceTierAccess")) return [];
+  const targets = [];
+  const accessHelpers = new Set();
+  const functions = [];
+  walk(ast, (node) => { if (isFunctionNode(node)) functions.push(node); });
+  for (const fn of functions) {
+    let settings = false;
+    let loading = false;
+    let auth = false;
+    const helpers = [];
+    walkFunctionContract(fn, (node) => {
+      if (node.type === "Property") {
+        settings ||= node.key.name === "serviceTierAccess" || isStringLiteral(node.key, "serviceTierAccess");
+        loading ||= node.key.name === "isLoading" || isStringLiteral(node.key, "isLoading");
+      }
+      if (node.type === "LogicalExpression" && flattenLogical(node, "||").length === 2 &&
+          exactAuthPair(node, source, "||", "===", "personalAccessToken") != null) auth = true;
+      if (node.type === "ConditionalExpression" && node.alternate.type === "Literal" &&
+          node.alternate.value === null && node.consequent.type === "CallExpression" &&
+          node.consequent.callee.type === "Identifier" && node.consequent.arguments.length === 1) {
+        helpers.push(node.consequent.callee.name);
+      }
+    });
+    if (!settings || !loading || !auth || helpers.length !== 1) continue;
+    accessHelpers.add(helpers[0]);
+    targets.push({ id: "fast_mode_settings_auth_gate", targetStart: fn.start, access: true });
+  }
+  // The new upstream bundle shares the access decoder between its settings and request gates.
+  for (const fn of functions) {
+    if (!fn.async || fn.params.length !== 2 || fn.body.type !== "BlockStatement") continue;
+    const statements = fn.body.body;
+    if (statements.length !== 4) continue;
+    const gate = statements[1];
+    const result = statements[3]?.argument;
+    if (gate.type !== "IfStatement" || gate.consequent.type !== "ReturnStatement" ||
+        gate.consequent.argument?.type !== "Literal" || gate.consequent.argument.value !== null ||
+        flattenLogical(gate.test, "&&").length !== 2 ||
+        exactAuthPair(gate.test, source, "&&", "!==", "personalAccessToken") == null ||
+        statements[3].type !== "ReturnStatement" || result?.type !== "SequenceExpression" ||
+        result.expressions.length !== 2) continue;
+    const [cache, decode] = result.expressions;
+    if (cache.type !== "CallExpression" || memberPropertyName(cache.callee) !== "setData" ||
+        memberPropertyName(cache.callee.object) !== "query" || cache.arguments.length !== 3 ||
+        decode.type !== "CallExpression" || !accessHelpers.has(decode.callee.name) ||
+        decode.arguments.length !== 1 ||
+        sourceFor(source, decode.arguments[0]) !== sourceFor(source, cache.arguments[2])) continue;
+    targets.push({ id: "fast_mode_request_auth_gate", targetStart: fn.start, access: true });
+  }
+  return targets;
+}
+
 function collectAlreadyPatchedGates(ast, source, comments) {
   const already = [];
   walk(ast, (node, parent) => {
@@ -318,9 +370,10 @@ function collectAlreadyPatchedGates(ast, source, comments) {
       if (!fnSrc.includes(marker)) continue;
       const booleanBody = unrestrictedBody(id, false);
       const settingsBody = unrestrictedBody(id, true);
+      const accessBody = unrestrictedBody(id, id === "fast_mode_settings_auth_gate", true);
       const compact = (body) => body.replace(/\s/g, "").replace(/;(?=\}$)/, "");
       const body = compact(sourceFor(source, node.body));
-      if (body !== compact(booleanBody) &&
+      if (body !== compact(booleanBody) && body !== compact(accessBody) &&
           (id !== "fast_mode_settings_auth_gate" || body !== compact(settingsBody))) {
         throw new Error(`fast_mode ${id} unrestricted body postcondition is malformed`);
       }
@@ -373,8 +426,10 @@ function collectAlreadyPatchedGates(ast, source, comments) {
   return already;
 }
 
-function unrestrictedBody(id, returnsSettings) {
-  const result = returnsSettings
+function unrestrictedBody(id, returnsSettings, access = false) {
+  const result = access
+    ? (returnsSettings ? "{serviceTierAccess:{fast:!0,ultrafast:!0},isLoading:!1}" : "{fast:!0,ultrafast:!0}")
+    : returnsSettings
     ? "{isServiceTierAllowed:!0,isLoading:!1}"
     : "!0";
   return `{return ${result}${UNRESTRICTED_MARKERS.get(id)}${MODEL_CAPABILITY_MARKER}}`;
@@ -455,7 +510,7 @@ function analyzeFastModeSource(source) {
   // Upgrade both upstream and older patches. Removing only the auth comparison
   // still leaves the selector waiting for an account-only requirements query.
   const legacyTargets = new Map(
-    [...patches, ...already.filter((target) => !target.unrestricted)]
+    [...patches, ...already.filter((target) => !target.unrestricted), ...collectServiceTierAccessTargets(ast, source)]
       .map((target) => [`${target.id}:${target.targetStart}`, target]),
   );
   const functions = new Map();
@@ -469,12 +524,14 @@ function analyzeFastModeSource(source) {
     walkFunctionContract(fn, (node) => {
       if (node.type === "Property" &&
           (node.key.name === "isServiceTierAllowed" ||
-           isStringLiteral(node.key, "isServiceTierAllowed"))) returnsSettings = true;
+           isStringLiteral(node.key, "isServiceTierAllowed") ||
+           node.key.name === "serviceTierAccess" ||
+           isStringLiteral(node.key, "serviceTierAccess"))) returnsSettings = true;
     });
     patches.push({
       id: target.id, targetStart: target.targetStart,
       start: fn.body.start, end: fn.body.end,
-      replacement: unrestrictedBody(target.id, returnsSettings),
+      replacement: unrestrictedBody(target.id, returnsSettings, target.access),
       original: sourceFor(source, fn.body),
     });
   }
@@ -602,7 +659,7 @@ function roleMarkerEvidence(source, targetId) {
     return [];
   }
 
-  let markerCount = 0;
+  let markerCount = collectServiceTierAccessTargets(ast, source).filter((target) => target.id === targetId).length;
   walk(ast, (node) => {
     if (!isFunctionNode(node)) return;
     if (sourceFor(source, node).includes(UNRESTRICTED_MARKERS.get(targetId))) {
