@@ -30,6 +30,16 @@ const {
 } = loadPatchModule();
 
 {
+  const source = 'const menu=[{menuTitle:`New Project…`},{label:"New Project..."}];const message={id:`codex.commandMenuTitle.newProject`,defaultMessage:`New Project…`};const unrelated=`New Project…`;';
+  const first = patchSource(source);
+  assert.ok(first.code.includes('menuTitle:`新建项目…`'));
+  assert.ok(first.code.includes('label:`新建项目…`'));
+  assert.ok(first.code.includes('defaultMessage:`新建项目…`'));
+  assert.ok(first.code.includes('const unrelated=`New Project…`'));
+  assert.strictEqual(patchSource(first.code).replacements.length, 0);
+}
+
+{
   const source = '{"existing":"保留","computerUseOverlay.escToCancel":"Esc to cancel"}\n';
   const first = patchComputerUseOverlayLocaleSource(source);
 

@@ -16,6 +16,9 @@ const { SRC_DIR, relPath } = require("./patch-util");
 
 const ZH_CN_TRANSLATION_SPECS = [
   ["settings.nav.archived-chats", "归档聊天"],
+  ["settings.nav.worktrees.v2", "工作树"],
+  ["settings.section.worktrees.v2", "工作树"],
+  ["codex.commandMenuTitle.newProject", "新建项目…"],
   ["codex.profileFooter.hidePet", "隐藏虚拟宠物"],
   ["codex.profileFooter.showPet", "显示虚拟宠物"],
   ["composer.mode.local.reasoning.max.label", "最高"],
@@ -1410,6 +1413,8 @@ if (ZH_CN_TRANSLATIONS.size !== ZH_CN_TRANSLATION_SPECS.length) {
 // Keep this intentionally small. These are confirmed semantic mistakes in the
 // current upstream catalog, not merely different wording preferences.
 const ZH_CN_FORCED_OVERRIDES = new Map([
+  ["settings.nav.worktrees.v2", "工作树"],
+  ["settings.section.worktrees.v2", "工作树"],
   ["composer.mode.local.reasoning.max.label", "最高"],
   ["composer.mode.local.reasoning.ultra.label", "超强"],
   ["composer.placeholder.plan", "描述你的任务以生成计划…"],

@@ -7,7 +7,7 @@ const { relPath, SRC_DIR } = require("./patch-util");
 const MESSAGE_ID = "serviceTier.ultrafast.description";
 const MARKER = "/* CodexRebuildServiceTierI18n */";
 const REMOTE_DESCRIPTION =
-  /case`ultrafast`:return (?<description>[A-Za-z_$][\w$]*\?\.description)\?\?(?<fallback>[A-Za-z_$][\w$]*\.ultrafastDescription)/g;
+  /case`ultrafast`:return (?<description>[A-Za-z_$][\w$]*\?\.description)(?<operator>\?\?|\|\|)(?<fallback>[A-Za-z_$][\w$]*\.ultrafastDescription)/g;
 
 function patchServiceTierI18nSource(source) {
   const markerCount = source.split(MARKER).length - 1;
@@ -23,10 +23,11 @@ function patchServiceTierI18nSource(source) {
     );
   }
   const match = matches[0];
-  const { description, fallback } = match.groups;
+  const { description, operator, fallback } = match.groups;
+  const absent = operator === "||" ? `!${description}` : `${description}==null`;
   const replacement =
     `case\`ultrafast\`:return (` +
-    `${description}==null||${description}.replace(/\\.$/,\`\`)===${fallback}.defaultMessage` +
+    `${absent}||${description}.replace(/\\.$/,\`\`)===${fallback}.defaultMessage` +
     `?${fallback}:${description})${MARKER}`;
   return {
     code:
@@ -51,7 +52,7 @@ function locateTargets(platform) {
     const assetsDir = path.join(SRC_DIR, name, "_asar", "webview", "assets");
     if (!fs.existsSync(assetsDir)) continue;
     const matches = fs.readdirSync(assetsDir).filter((file) => {
-      if (!/^app-initial.*\.js$/.test(file)) return false;
+      if (!/^app-(?:initial|shared).*\.js$/.test(file)) return false;
       const source = fs.readFileSync(path.join(assetsDir, file), "utf8");
       return source.includes(MESSAGE_ID) && source.includes("case`ultrafast`:return");
     });
