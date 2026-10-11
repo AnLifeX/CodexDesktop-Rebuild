@@ -52,6 +52,17 @@ test("fails closed when the default catalog export is missing", () => {
   );
 });
 
+test("localizes Worktrees navigation and page heading while preserving page translations", () => {
+  const source = 'var c;c={"settings.nav.worktrees.v2":`Worktrees`,"settings.section.worktrees.v2":`Worktrees`,"settings.worktrees.row.title":`工作树`};export{c as default}';
+  const first = patchCatalogSource(source);
+  const catalog = extractCatalogMessages(first.code);
+  for (const id of ["settings.nav.worktrees.v2", "settings.section.worktrees.v2", "settings.worktrees.row.title"]) {
+    assert.equal(catalog.get(id), "工作树");
+  }
+  assert.equal(catalog.get("codex.commandMenuTitle.newProject"), "新建项目…");
+  assert.equal(patchCatalogSource(first.code).replacements.length, 0);
+});
+
 test("translation specs cover current voice settings and shortcut messages", () => {
   const assetsDir = path.join(
     __dirname,
