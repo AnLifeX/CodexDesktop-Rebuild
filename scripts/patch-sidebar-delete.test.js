@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const vm = require("node:vm");
 const { patchSidebarSource } = require("./patch-sidebar-delete");
 
 const SOURCE = [
@@ -10,12 +11,19 @@ const SOURCE = [
   "function menu(){return[{id:`delete-thread`,message:{id:`sidebarElectron.deleteThread`},onSelect:openNativeDeleteDialog}]}",
 ].join(";");
 
+const NEW_SOURCE = [
+  'function TrashInit(){return(TrashInit=once(()=>{TrashIcon=`<svg><path d="M10.6299 1.33496rest"/></svg>`}),TrashInit())}var TrashIcon',
+  'function Rail(e){let{archive:n,awaitBeforeOpen:r,primaryAction:i,getMenuItems:a}=e,l=intl();if(n==null&&i==null&&a==null)return null;let u=[],d=[];let f;t[6]!==u||t[7]!==d?(f=[...u,...d],t[6]=u,t[7]=d,t[8]=f):f=t[8];let p;return(0,UI.jsx)(Actions,{actions:f,leadingAction:p,trailingAction:i,icon:(0,UI.jsx)(Icon,{}),id:`thread-primary-action`})}',
+  'function Row(){let E=false,Re={disabled:false},Ct=menu,At=0,jt=null;let Tt=e=>{return(0,UI.jsx)(Rail,{getMenuItems:E||Re.disabled===!0?()=>Ct(`row-actions`):void 0,awaitBeforeOpen:void 0})};return(0,UI.jsx)(Item,{additionalHoverActionCount:At,renderActions:Tt})}',
+  'function menu(){return[{id:`delete-thread`,onSelect:openNativeDeleteDialog}]}',
+].join(';');
+
 test("adds only a hover action backed by the native delete item", () => {
   const first = patchSidebarSource(SOURCE);
   assert.equal(first.status, "patched");
   assert.match(
     first.code,
-    /deleteAction:E\?\{message:null,onSelect:\(\)=>yt\(`row-actions`\)\.find\(e=>e\.id===`delete-thread`\)\?\.onSelect\(\)\}:void 0/,
+    /deleteAction:E\?\{message:null,onSelect:async\(\)=>\(await yt\(`row-actions`\)\)\.find\(e=>e\.id===`delete-thread`\)\?\.onSelect\(\)\}:void 0/,
   );
   assert.match(first.code, /Et=\(\+!!bt\)\+\(E\?1:0\)/);
   assert.doesNotMatch(first.code, /deleteAction:yt\(`row-actions`\)/);
@@ -30,7 +38,7 @@ test("adds only a hover action backed by the native delete item", () => {
 test("migrates the render-time menu lookup from the previous patch", () => {
   const broken = patchSidebarSource(SOURCE).code
     .replace(
-      "deleteAction:E?{message:null,onSelect:()=>yt(`row-actions`).find(e=>e.id===`delete-thread`)?.onSelect()}:void 0,",
+      "deleteAction:E?{message:null,onSelect:async()=>(await yt(`row-actions`)).find(e=>e.id===`delete-thread`)?.onSelect()}:void 0,",
       "deleteAction:yt(`row-actions`).find(e=>e.id===`delete-thread`),",
     )
     .replace("+(E?1:0)", "+(yt(`row-actions`).some(e=>e.id===`delete-thread`)?1:0)");
@@ -59,14 +67,44 @@ test("requires the official delete menu item", () => {
   );
 });
 
+test("click opens native confirmation with sync and async menus on both rails", async (t) => {
+  for (const [rail, source] of [["legacy", SOURCE], ["new", NEW_SOURCE]]) {
+    for (const asynchronous of [false, true]) await t.test(`${rail}, async=${asynchronous}`, async () => {
+      const patched = patchSidebarSource(source).code;
+      let confirmations = 0;
+      const context = vm.createContext({
+        Memo: { c: () => [] },
+        UI: { jsx: (component, props) => ({ component, props }) },
+        Item: () => {},
+        openNativeDeleteDialog: () => { confirmations += 1; },
+      });
+      vm.runInContext(patched + `;var menuItems=[{id:\`delete-thread\`,onSelect:openNativeDeleteDialog}];menu=${asynchronous ? "async" : ""}()=>menuItems;`, context);
+      const action = vm.runInContext("Row().props.renderActions({}).props.deleteAction", context);
+      assert.equal(confirmations, 0, "rendering must not open confirmation");
+      await action.onSelect();
+      assert.equal(confirmations, 1);
+      vm.runInContext("menuItems=[]", context);
+      await action.onSelect();
+      assert.equal(confirmations, 1, "missing native item must not delete an ineligible thread");
+    });
+  }
+});
+
+test("repairs the shipped synchronous callback on both rails and remains idempotent", () => {
+  for (const source of [SOURCE, NEW_SOURCE]) {
+    const broken = patchSidebarSource(source).code.replace(
+      /onSelect:async\(\)=>\(await ([\w$]+)\(`row-actions`\)\)\.find/,
+      "onSelect:()=>$1(`row-actions`).find",
+    );
+    const repaired = patchSidebarSource(broken);
+    assert.equal(repaired.status, "patched");
+    assert.match(repaired.code, /onSelect:async\(\)=>\(await [\w$]+\(`row-actions`\)\)\.find/);
+    assert.equal(patchSidebarSource(repaired.code).status, "already");
+  }
+});
+
 test("adds the hover action to the new sidebar rail with inline SVG icons", () => {
-  const source = [
-    'function TrashInit(){return(TrashInit=once(()=>{TrashIcon=`<svg><path d="M10.6299 1.33496rest"/></svg>`}),TrashInit())}var TrashIcon',
-    'function Rail(e){let{archive:n,awaitBeforeOpen:r,primaryAction:i,getMenuItems:a}=e,l=intl();if(n==null&&i==null&&a==null)return null;let u=[],d=[];let f;t[6]!==u||t[7]!==d?(f=[...u,...d],t[6]=u,t[7]=d,t[8]=f):f=t[8];let p;return(0,UI.jsx)(Actions,{actions:f,leadingAction:p,trailingAction:i,icon:(0,UI.jsx)(Icon,{}),id:`thread-primary-action`})}',
-    'function Row(){let E=false,Re={disabled:false},Ct=menu,At=0,jt=null;let Tt=e=>{return(0,UI.jsx)(Rail,{getMenuItems:E||Re.disabled===!0?()=>Ct(`row-actions`):void 0,awaitBeforeOpen:void 0})};return(0,UI.jsx)(Item,{additionalHoverActionCount:At})}',
-    'function menu(){return[{id:`delete-thread`,onSelect:openNativeDeleteDialog}]}',
-  ].join(';');
-  const patched = patchSidebarSource(source);
+  const patched = patchSidebarSource(NEW_SOURCE);
   assert.equal(patched.status, "patched");
   assert.match(patched.code, /d:`M10\.6299 1\.33496rest`/);
   assert.match(patched.code, /\.find\(e=>e\.id===`delete-thread`\)\?\.onSelect\(\)/);

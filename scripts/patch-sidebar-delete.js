@@ -139,7 +139,7 @@ function patchRow(source, node, hoverName) {
     const hoverCall = new RegExp(`\\)\\(${hoverName.replace(/[$]/g, "\\$")},\\{`);
     if (!hoverCall.test(code)) throw new Error("native sidebar action rail call changed");
     code = code.replace(hoverCall,
-      `)(${hoverName},{deleteAction:${condition}?{onSelect:()=>${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`);
+      `)(${hoverName},{deleteAction:${condition}?{onSelect:async()=>(await ${menuFactory}(\`row-actions\`)).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`);
     const countProp = code.match(/additionalHoverActionCount:([\w$]+)/)?.[1];
     const count = countProp && new RegExp(`\\b${countProp.replace(/[$]/g, "\\$")}=([^,]+),`);
     if (!count?.test(code)) throw new Error("native sidebar hover count binding changed");
@@ -154,8 +154,8 @@ function patchRow(source, node, hoverName) {
   if (!hoverCall.test(code)) throw new Error("native sidebar action rail call changed");
   code = code.replace(
     hoverCall,
-    `)(${hoverName},{deleteAction:${menuEnabled}?{message:null,onSelect:()=>` +
-      `${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`,
+    `)(${hoverName},{deleteAction:${menuEnabled}?{message:null,onSelect:async()=>(await ` +
+      `${menuFactory}(\`row-actions\`)).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`,
   );
 
   const countProp = code.match(/additionalHoverActionCount:([\w$]+)/)?.[1];
@@ -185,7 +185,7 @@ function migrateRenderTimeMenuLookup(source) {
   return source
     .replace(
       action,
-      `deleteAction:${menuEnabled}?{message:null,onSelect:()=>${menuFactory}(\`row-actions\`).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`,
+      `deleteAction:${menuEnabled}?{message:null,onSelect:async()=>(await ${menuFactory}(\`row-actions\`)).find(e=>e.id===\`delete-thread\`)?.onSelect()}:void 0,`,
     )
     .replace(count, `+(${menuEnabled}?1:0)`);
 }
@@ -195,6 +195,12 @@ function patchSidebarSource(source) {
   if (markerCount === 1) {
     const legacy = /deleteAction:[\w$]+\(`row-actions`\)\.find\(e=>e\.id===`delete-thread`\),/.test(source);
     let code = legacy ? migrateRenderTimeMenuLookup(source) : source;
+    const { row } = findOwnedFunctions(code, parse(code));
+    const rowBody = code.slice(row.start, row.end).replace(
+      /onSelect:\(\)=>([\w$]+)\(`row-actions`\)\.find\(e=>e\.id===`delete-thread`\)\?\.onSelect\(\)/,
+      "onSelect:async()=>(await $1(`row-actions`)).find(e=>e.id===`delete-thread`)?.onSelect()",
+    );
+    code = code.slice(0, row.start) + rowBody + code.slice(row.end);
     const { hover } = findOwnedFunctions(code, parse(code));
     const body = code.slice(hover.start, hover.end);
     const binding = body.match(/([\w$]+)=([\w$]+)\(\);if\(/);
