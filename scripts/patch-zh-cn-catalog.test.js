@@ -63,6 +63,30 @@ test("localizes Worktrees navigation and page heading while preserving page tran
   assert.equal(patchCatalogSource(first.code).replacements.length, 0);
 });
 
+test("localizes device storage and cleanup with counts and irreversible deletion warnings", () => {
+  const source = 'var c;c={"settings.section.storage":`存储空间`};export{c as default}';
+  const first = patchCatalogSource(source);
+  const catalog = extractCatalogMessages(first.code);
+  assert.equal(catalog.get("settings.section.storage"), "存储空间");
+  assert.equal(catalog.get("settings.storage.thisDevice"), "此设备");
+  assert.equal(catalog.get("settings.storage.category.worktrees"), "工作树");
+  assert.equal(catalog.get("settings.storage.cleanup.review"), "查看");
+  for (const [id, parameters] of [
+    ["settings.storage.measuredTotal", ["size"]],
+    ["settings.storage.cleanup.days", ["days"]],
+    ["settings.storage.cleanup.selection", ["count", "subagents"]],
+    ["settings.storage.cleanup.result", ["deleted", "skipped", "failed"]],
+  ]) {
+    for (const parameter of parameters) assert.ok(catalog.get(id).includes(`{${parameter}}`), `${id}: ${parameter}`);
+  }
+  const confirmation = catalog.get("settings.storage.cleanup.confirmBody");
+  assert.ok(confirmation.includes("{count, plural, one {# 个聊天} other {# 个聊天}}"));
+  assert.ok(confirmation.includes("永久删除") && confirmation.includes("子代理") && confirmation.includes("无法撤销"));
+  assert.ok(catalog.get("settings.storage.cleanup.warningWithSize").includes("无法恢复"));
+  assert.ok(catalog.get("settings.storage.cleanup.recheckError").includes("未删除任何内容"));
+  assert.equal(patchCatalogSource(first.code).replacements.length, 0);
+});
+
 test("translation specs cover current voice settings and shortcut messages", () => {
   const assetsDir = path.join(
     __dirname,
