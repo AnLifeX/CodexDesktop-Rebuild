@@ -1239,6 +1239,61 @@ test("patchWebviewMenuBarCode adapts the latest titlebar aliases structurally", 
   assert.strictEqual(patchWebviewMenuBarCode(patched), patched);
 });
 
+test("updater panel enters the top layer, follows its trigger, and removes listeners on close", () => {
+  const patched = patchWebviewMenuBarCode(LATEST_LOCAL_WEBVIEW_SOURCE);
+  const ast = require("acorn").parse(patched, { ecmaVersion: "latest", sourceType: "module" });
+  const helper = ast.body.find((node) => node.type === "FunctionDeclaration" && node.id.name === "codexRebuildUpdaterShowPanel");
+  assert.ok(helper);
+  assert.ok(patched.includes("popover:'manual'"));
+  assert.ok(patched.includes("position:fixed;inset:auto;margin:0"));
+  const listeners = new Map();
+  let open = false;
+  const panel = {
+    style: {},
+    showPopover() { open = true; },
+    hidePopover() { open = false; },
+    matches(selector) { assert.strictEqual(selector, ":popover-open"); return open; },
+  };
+  let bounds = { left: 100, bottom: 30 };
+  const anchor = { querySelector: () => panel, getBoundingClientRect: () => bounds };
+  const window = {
+    innerWidth: 800, innerHeight: 600,
+    addEventListener(name, callback, capture) { listeners.set(name, { callback, capture }); },
+    removeEventListener(name, callback, capture) {
+      assert.strictEqual(callback, listeners.get(name).callback);
+      assert.strictEqual(capture, listeners.get(name).capture);
+      listeners.delete(name);
+    },
+  };
+  const show = vm.runInNewContext(`(${patched.slice(helper.start, helper.end)})`, { window });
+  const close = show(anchor);
+  assert.ok(open);
+  assert.deepStrictEqual(panel.style, { left: "100px", top: "37px", maxHeight: "551px" });
+  bounds = { left: 780, bottom: 40 };
+  listeners.get("resize").callback();
+  assert.strictEqual(panel.style.left, "460px");
+  assert.strictEqual(panel.style.top, "47px");
+  window.innerWidth = 300;
+  window.innerHeight = 200;
+  listeners.get("scroll").callback();
+  assert.strictEqual(panel.style.left, "12px");
+  assert.strictEqual(panel.style.maxHeight, "141px");
+  close();
+  assert.ok(!open);
+  assert.strictEqual(listeners.size, 0);
+  assert.strictEqual(show(null), undefined);
+});
+
+test("migrates v10 titlebar cards to top-layer popovers", () => {
+  const patched = patchWebviewMenuBarCode(LATEST_LOCAL_WEBVIEW_SOURCE);
+  const legacy = patched.replaceAll(`titlebar-component:v${LOCAL_UPDATER_CONTRACT_VERSION}`, "titlebar-component:v10")
+    .replaceAll(`titlebar-descriptor:v${LOCAL_UPDATER_CONTRACT_VERSION}`, "titlebar-descriptor:v10")
+    .replaceAll("popover:'manual',", "");
+  const migrated = patchWebviewMenuBarCode(legacy);
+  assert.strictEqual(migrated, patched);
+  assert.strictEqual(patchWebviewMenuBarCode(migrated), migrated);
+});
+
 test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appends the updater", () => {
   const source = [
     "var Ri,Ji,Mi={Root:`root`};",
