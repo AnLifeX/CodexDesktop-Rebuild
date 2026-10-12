@@ -6,6 +6,7 @@ const {
   patchAppMainSource,
   patchDataControlsSource,
   patchArchiveContracts,
+  patchArchivedListProviders,
   planArchivePlatform,
   executeArchivePlatforms,
   formatArchiveSummary,
@@ -99,6 +100,68 @@ const CURRENT_ARIA_NATIVE_DATA_CONTROLS = [
   "return jsx(Button,{ariaLabel:aria})}",
   "export{Settings as DataControlsSettings}",
 ].join("");
+
+test("archived pagination includes threads from a previous provider", async () => {
+  const source = "async function list(client,cursor){return client.sendRequest(`thread/list`,{archived:!0,cursor,limit:100,modelProviders:null,sourceKinds:[`vscode`],useStateDbOnly:!0})}";
+  const threads = [{ id: "old", provider: "local" }, { id: "new", provider: "custom" }];
+  const calls = [];
+  const client = {
+    async sendRequest(method, options) {
+      calls.push({ method, options });
+      const providers = options.modelProviders ?? ["custom"];
+      return { data: threads.filter((thread) => providers.length === 0 || providers.includes(thread.provider)) };
+    },
+  };
+  const original = new Function(`${source};return list`)();
+  assert.deepEqual((await original(client, "next")).data.map((thread) => thread.id), ["new"]);
+  const patched = patchArchivedListProviders(source);
+  const list = new Function(`${patched};return list`)();
+  assert.deepEqual((await list(client, "next")).data.map((thread) => thread.id), ["old", "new"]);
+  assert.deepEqual(calls[1], {
+    method: "thread/list",
+    options: { archived: true, cursor: "next", limit: 100, modelProviders: [], sourceKinds: ["vscode"], useStateDbOnly: true },
+  });
+  assert.equal(patchArchivedListProviders(patched), patched);
+});
+
+test("provider fix preserves active queries, explicit filters and unrelated calls", () => {
+  const unchanged = [
+    'client.sendRequest("thread/list",{archived:false,modelProviders:null});',
+    'client.sendRequest("thread/list",{modelProviders:null});',
+    'client.sendRequest("thread/list",{archived:true,modelProviders:["custom"]});',
+    'client.sendRequest("thread/delete",{archived:true,modelProviders:null});',
+    'client.unrelated({archived:true,modelProviders:null});',
+    'const text="modelProviders:null,archived:!0";',
+  ].join("");
+  const queries = 'client.listAllThreads({modelProviders:null,archived:!0});client["sendRequest"]("thread/list",{"archived":true,"modelProviders":null});';
+  assert.equal(
+    patchArchivedListProviders(unchanged + queries),
+    unchanged + 'client.listAllThreads({modelProviders:[],archived:!0});client["sendRequest"]("thread/list",{"archived":true,"modelProviders":[]});',
+  );
+});
+
+test("patch plans write both archive queries and stay idempotent on Windows and Mac", () => {
+  const appMainSource = CURRENT_RUNTIME_NATIVE_APP_MAIN + ';manager.listAllThreads({modelProviders:null,archived:!0});';
+  const dataControlsSource = CURRENT_ARIA_NATIVE_DATA_CONTROLS + ';client.sendRequest(`thread/list`,{archived:!0,modelProviders:null});';
+  for (const platform of ["win", "mac-arm64"]) {
+    const candidates = [
+      { path: "webview/assets/app-shared-latest.js", source: appMainSource },
+      { path: "webview/assets/data-controls-latest.js", source: dataControlsSource },
+    ];
+    const writes = [];
+    const first = executeArchivePlatforms({
+      platformInputs: [{ platform, candidates }],
+      writeFile: (path, code) => writes.push({ path, source: code }),
+    });
+    assert.equal(first.platformPlans[0].writes[0].result.status, "patched");
+    assert.equal(writes.length, 2);
+    assert(writes.every((write) => write.source.includes("modelProviders:[]")));
+    executeArchivePlatforms({
+      platformInputs: [{ platform, candidates: writes }],
+      writeFile: () => assert.fail("second application should not write files"),
+    });
+  }
+});
 
 test("keeps native archive deletion and injects an independent active delete route", () => {
   assert.equal(
