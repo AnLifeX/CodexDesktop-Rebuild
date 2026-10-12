@@ -1117,11 +1117,13 @@ function analyzeArchiveAppMainLayer(source) {
 }
 
 function patchAppMainSource(source) {
+  const originalSource = source;
+  source = patchArchivedListProviders(source);
   const inspection = inspectArchiveAppMainSource(source);
   if (inspection && inspection.mode !== "native") {
     return {
       code: source,
-      status: inspection.status,
+      status: source !== originalSource ? "patched" : inspection.status,
       mode: inspection.mode,
       counts:
         inspection.mode === "combined"
@@ -1189,6 +1191,29 @@ function archiveStaticBoolean(node) {
     node.argument?.type === "Literal"
   ) return !node.argument.value;
   return null;
+}
+
+function patchArchivedListProviders(source) {
+  const edits = [];
+  walkArchive(parseArchiveSource(source, "archived thread list"), (node) => {
+    if (node.type !== "CallExpression" || node.callee.type !== "MemberExpression") return;
+    const method = node.callee.computed
+      ? archiveLiteral(node.callee.property)
+      : node.callee.property.name;
+    const options = method === "listAllThreads"
+      ? node.arguments[0]
+      : method === "sendRequest" && archiveLiteral(node.arguments[0]) === "thread/list"
+        ? node.arguments[1]
+        : null;
+    if (archiveStaticBoolean(archiveObjectProperty(options, "archived")?.value) !== true) return;
+    const providers = archiveObjectProperty(options, "modelProviders")?.value;
+    if (providers?.type === "Literal" && providers.value === null) edits.push(providers);
+  });
+  // Some bundled CLIs treat null as the current provider; [] explicitly includes all.
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    source = source.slice(0, edit.start) + "[]" + source.slice(edit.end);
+  }
+  return source;
 }
 
 function walkExecutableArchiveFunction(root, visitor) {
@@ -1523,11 +1548,13 @@ function inspectArchiveDataControlsSource(source) {
 }
 
 function patchDataControlsSource(source) {
+  const originalSource = source;
+  source = patchArchivedListProviders(source);
   const inspection = inspectArchiveDataControlsSource(source);
   if (inspection?.mode === "native") {
     return {
       code: source,
-      status: "native",
+      status: source !== originalSource ? "patched" : "native",
       mode: "native",
       counts: archiveCount(0, 0, 1, "archive button"),
     };
@@ -1535,7 +1562,7 @@ function patchDataControlsSource(source) {
   if (inspection?.mode === "legacy") {
     return {
       code: source,
-      status: "already",
+      status: source !== originalSource ? "patched" : "already",
       mode: "legacy",
       counts: archiveCount(0, 1, 0, "archive button"),
     };
@@ -1557,11 +1584,13 @@ function patchArchiveContracts({ appMainSource, dataControlsSource }) {
       `archive route/UI mode mismatch: app-main=${appMain.mode}, data-controls=${dataControls.mode}`,
     );
   }
-  const status = appMain.status === "already"
-    ? "already"
-    : appMain.status === "native" && dataControls.status === "native"
-      ? "native"
-      : "patched";
+  const status = appMain.status === "patched" || dataControls.status === "patched"
+    ? "patched"
+    : appMain.status === "already"
+      ? "already"
+      : appMain.status === "native" && dataControls.status === "native"
+        ? "native"
+        : "patched";
   return {
     status,
     appMain,
@@ -1990,6 +2019,7 @@ module.exports = {
   patchAppMainSource,
   patchDataControlsSource,
   patchArchiveContracts,
+  patchArchivedListProviders,
   planArchivePlatform,
   executeArchivePlatforms,
   findWindowsArchiveTargets,
