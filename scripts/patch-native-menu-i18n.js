@@ -127,6 +127,7 @@ const MENU_LABEL_TRANSLATIONS = [
   ["Search Files…", "搜索文件..."],
   ["Rename chat", "重命名聊天"],
   ["Toggle File Tree", "切换文件树"],
+  ["Toggle navigation panel", "切换导航面板"],
   ["Start Trace Recording", "开始跟踪录制"],
   ["New Chat", "新聊天"],
   ["Quick Chat", "快速聊天"],
@@ -137,6 +138,8 @@ const MENU_LABEL_TRANSLATIONS = [
   ["Wake Pet", "唤醒虚拟宠物"],
   ["Previous Chat", "上一个聊天"],
   ["Next Chat", "下一个聊天"],
+  ["Previous Sidebar Item", "上一个侧边栏条目"],
+  ["Next Sidebar Item", "下一个侧边栏条目"],
   ["Settings…", "设置..."],
   ["Keyboard Shortcuts", "键盘快捷键"],
   ["Process Manager", "进程管理器"],
@@ -148,6 +151,7 @@ const MENU_LABEL_TRANSLATIONS = [
   ["Open Browser Tab", "打开浏览器标签页"],
   ["Toggle Browser Panel", "切换浏览器面板"],
   ["Toggle Review Panel", "切换审查面板"],
+  ["Toggle Changes Panel", "切换更改面板"],
   ["Open review tab", "打开审查标签页"],
   ["Toggle Side Panel", "切换侧边面板"],
   ["Toggle maximize side panel", "切换侧边面板最大化"],
@@ -235,6 +239,7 @@ const COMMAND_TITLE_MESSAGE_SPECS = [
   ["newWindow", "New Window"],
   ["nextThread", "Next Task"],
   ["nextThread", "Next Chat"],
+  ["nextThread", "Next Sidebar Item"],
   ["openAvatarOverlay", "Show pet"],
   ["openBrowserTab", "Open Browser Tab"],
   ["openCommandMenu", "Open command menu"],
@@ -243,6 +248,7 @@ const COMMAND_TITLE_MESSAGE_SPECS = [
   ["openThreadInNewWindow", "Open in New Window"],
   ["previousThread", "Previous Task"],
   ["previousThread", "Previous Chat"],
+  ["previousThread", "Previous Sidebar Item"],
   ["reloadBrowserPage", "Reload Browser Page"],
   ["renameThread", "Rename task"],
   ["renameThread", "Rename chat"],
@@ -256,7 +262,9 @@ const COMMAND_TITLE_MESSAGE_SPECS = [
   ["toggleBottomPanel", "Toggle Bottom Panel"],
   ["toggleBrowserPanel", "Toggle Browser Panel"],
   ["toggleReviewPanel", "Toggle Review Panel"],
+  ["toggleReviewPanel", "Toggle Changes Panel"],
   ["toggleFileTreePanel", "Toggle File Tree"],
+  ["toggleFileTreePanel", "Toggle navigation panel"],
   ["togglePinnedSummary", "Toggle Pinned Summary"],
   ["toggleSidebar", "Toggle Sidebar"],
   ["toggleSidePanel", "Toggle Side Panel"],
@@ -570,6 +578,7 @@ function locateWebviewCommandTargets(platforms) {
       const source = fs.readFileSync(filePath, "utf8");
       if (
         source.includes("codex.commandMenuTitle.") &&
+        /\bid\s*:\s*[`"']codex\.commandMenuTitle\./.test(source) &&
         (source.includes("menuTitleIntlId") || source.includes("codex.commandDescription."))
       ) {
         targets.push({ platform: plat, path: filePath });

@@ -18,6 +18,11 @@ const NEW_SOURCE = [
   'function menu(){return[{id:`delete-thread`,onSelect:openNativeDeleteDialog}]}',
 ].join(';');
 
+const SOURCE_1013 = NEW_SOURCE.replace(
+  "archive:n,awaitBeforeOpen:r,",
+  "archive:n,archiveAriaLabel:archiveLabel,awaitBeforeOpen:r,",
+);
+
 test("adds only a hover action backed by the native delete item", () => {
   const first = patchSidebarSource(SOURCE);
   assert.equal(first.status, "patched");
@@ -68,23 +73,31 @@ test("requires the official delete menu item", () => {
 });
 
 test("click opens native confirmation with sync and async menus on both rails", async (t) => {
-  for (const [rail, source] of [["legacy", SOURCE], ["new", NEW_SOURCE]]) {
+  for (const [rail, source] of [["legacy", SOURCE], ["new", NEW_SOURCE], ["26.1013", SOURCE_1013]]) {
     for (const asynchronous of [false, true]) await t.test(`${rail}, async=${asynchronous}`, async () => {
       const patched = patchSidebarSource(source).code;
       let confirmations = 0;
       const context = vm.createContext({
         Memo: { c: () => [] },
+        t: [],
+        once: fn => fn,
+        intl: () => ({ formatMessage: message => message.id }),
+        Messages: { archiveThread: { id: "archive" } },
         UI: { jsx: (component, props) => ({ component, props }) },
         Item: () => {},
+        Actions: () => {},
+        Archive: () => {},
+        Icon: () => {},
         openNativeDeleteDialog: () => { confirmations += 1; },
       });
       vm.runInContext(patched + `;var menuItems=[{id:\`delete-thread\`,onSelect:openNativeDeleteDialog}];menu=${asynchronous ? "async" : ""}()=>menuItems;`, context);
-      const action = vm.runInContext("Row().props.renderActions({}).props.deleteAction", context);
+      const action = vm.runInContext("Rail(Row().props.renderActions({}).props).props.actions.find(action=>action.id===`thread-delete-action`)", context);
+      assert.equal(action.ariaLabel, rail === "legacy" ? "Permanently delete" : "sidebarElectron.deleteThread");
       assert.equal(confirmations, 0, "rendering must not open confirmation");
-      await action.onSelect();
+      await action.onClick();
       assert.equal(confirmations, 1);
       vm.runInContext("menuItems=[]", context);
-      await action.onSelect();
+      await action.onClick();
       assert.equal(confirmations, 1, "missing native item must not delete an ineligible thread");
     });
   }
@@ -111,4 +124,11 @@ test("adds the hover action to the new sidebar rail with inline SVG icons", () =
   assert.match(patched.code, /sidebarElectron\.deleteThread/);
   assert.match(patched.code, /ariaLabel:l\.formatMessage\(\{id:`sidebarElectron\.deleteThread`/);
   assert.equal(patchSidebarSource(patched.code).status, "already");
+});
+
+test("preserves the 26.1013 archive label and keeps the delete action idempotent", () => {
+  const patched = patchSidebarSource(SOURCE_1013);
+  assert.match(patched.code, /archive:n,deleteAction:CodexDeleteAction,archiveAriaLabel:archiveLabel,awaitBeforeOpen:r,/);
+  assert.equal(patchSidebarSource(patched.code).code, patched.code);
+  assert.throws(() => patchSidebarSource(SOURCE_1013.replace("archive:n,", "archive:n=null,")), /native sidebar action props changed/);
 });

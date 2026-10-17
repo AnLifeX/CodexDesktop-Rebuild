@@ -16,7 +16,7 @@ const FUNCTION_ANCHOR =
   "function qit({decorateApp:e=async()=>null,loadHelperTransport:t})";
 const LATEST_FUNCTION_ANCHOR =
   "function Wit({decorateApp:e=async()=>null,loadHelperTransport:t})";
-const SHARED_TRANSPORT_LOAD = "let e=c,n=t(e.signal).then";
+const SHARED_TRANSPORT_LOAD = /let e=c,([\w$]+)=t\(e\.signal\)\.then/g;
 const ORIGINAL_CAPTURE =
   "try{let t=await M7(d(),o),r=Zit(e,f.window,f.decoration,i,s),a=await v(t,f,r,o);if(a==null)return null;let{transitionId:l,...p}=a,m={emitUpdate:n,signal:o==null?c.signal:AbortSignal.any([o,c.signal]),transitionId:l,transport:t,window:f.window},h=g(m);return u.add(h),h.finally(()=>u.delete(h)),{result:`started`,...p}}catch(e){return o?.aborted||D7().warning(`Windows Appshot start failed`,{safe:{requestId:a},sensitive:{error:e}}),null}";
 const PATCHED_CAPTURE =
@@ -29,30 +29,38 @@ function latestCapture(source) {
 
 function patchMainSource(source) {
   if (source.includes("closeCaptureTransport=Number(process.getSystemVersion")) {
-    return source.replace(SHARED_TRANSPORT_LOAD, "let e=c,n=loadHelperTransport(e.signal).then");
+    return source.replace(SHARED_TRANSPORT_LOAD, "let e=c,$1=loadHelperTransport(e.signal).then");
   }
   const anchors = source.match(/function [\w$]+\(\{decorateApp:e=async\(\)=>null,loadHelperTransport:t\}\)/g) ?? [];
   if (anchors.length !== 1) {
     throw new Error("Windows Appshot bridge function anchor changed");
   }
   const anchor = anchors[0];
-  const captureMatches = [...source.matchAll(/try\{let t=await ([\w$]+)\(d\(\),o\),r=([\w$]+)\(e,f\.window,f\.decoration,i,s\),a=await ([\w$]+)\(t,f,r,o\)/g)];
+  const captureMatches = [...source.matchAll(/try\{let t=await ([\w$]+)\(d\(\),o\),([\w$]+)=([\w$]+)\(e,f\.window,f\.decoration,i,s\),a=await ([\w$]+)\(t,f,\2,o\)/g)];
   const loggerMatches = [...source.matchAll(/\|\|([\w$]+)\(\)\.warning\(`Windows Appshot start failed`/g)];
-  if (captureMatches.length !== 1 || loggerMatches.length !== 1) {
+  const sharedLoads = [...source.matchAll(SHARED_TRANSPORT_LOAD)];
+  if (captureMatches.length !== 1 || loggerMatches.length !== 1 || sharedLoads.length !== 1) {
     throw new Error("Windows Appshot capture implementation changed");
   }
-  const names = [captureMatches[0][1], captureMatches[0][2], captureMatches[0][3], loggerMatches[0][1]];
-  const rename = (capture) => capture.replaceAll("M7(", `${names[0]}(`)
-    .replaceAll("Zit(", `${names[1]}(`).replaceAll("v(", `${names[2]}(`)
-    .replaceAll("D7().warning", `${names[3]}().warning`);
+  const [, transport, decoration, decorate, startCapture] = captureMatches[0];
+  // 26.1013 reuses the old decoration name for the update callback. Resolve
+  // each binding independently, then require the entire capture body to match.
+  const emitter = source.slice(captureMatches[0].index).match(/m=\{emitUpdate:([\w$]+),signal:/)?.[1];
+  if (!emitter) throw new Error("Windows Appshot capture implementation changed");
+  const rename = (capture) => capture.replaceAll("M7(", `${transport}(`)
+    .replaceAll("r=Zit(", `${decoration}=${decorate}(`)
+    .replaceAll("f,r,o)", `f,${decoration},o)`)
+    .replaceAll("v(", `${startCapture}(`)
+    .replaceAll("emitUpdate:n,", `emitUpdate:${emitter},`)
+    .replaceAll("D7().warning", `${loggerMatches[0][1]}().warning`);
   const originalCapture = rename(ORIGINAL_CAPTURE);
   const patchedCapture = rename(PATCHED_CAPTURE);
-  if (!source.includes(SHARED_TRANSPORT_LOAD) || source.split(originalCapture).length !== 2) {
+  if (source.split(originalCapture).length !== 2) {
     throw new Error("Windows Appshot capture implementation changed");
   }
   return source
     .replace(anchor, anchor.replace("loadHelperTransport:t", "loadHelperTransport"))
-    .replace(SHARED_TRANSPORT_LOAD, "let e=c,n=loadHelperTransport(e.signal).then")
+    .replace(SHARED_TRANSPORT_LOAD, "let e=c,$1=loadHelperTransport(e.signal).then")
     .replace(originalCapture, patchedCapture);
 }
 

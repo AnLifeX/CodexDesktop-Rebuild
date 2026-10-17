@@ -30,6 +30,25 @@ const {
 } = loadPatchModule();
 
 {
+  const source = 'const old={id:`codex.commandMenuTitle.toggleFileTreePanel`,defaultMessage:`Toggle File Tree`};const current={defaultMessage:`Toggle navigation panel`,id:`codex.commandMenuTitle.toggleFileTreePanel`};const unrelated=`Toggle navigation panel`;';
+  const patched = patchSource(source);
+  assert.ok(patched.code.includes('defaultMessage:`切换文件树`'));
+  assert.ok(patched.code.includes('defaultMessage:`切换导航面板`'));
+  assert.ok(patched.code.includes('const unrelated=`Toggle navigation panel`'));
+  assert.equal(patchSource(patched.code).code, patched.code);
+  for (const [id, from, to] of [
+    ["previousThread", "Previous Sidebar Item", "上一个侧边栏条目"],
+    ["nextThread", "Next Sidebar Item", "下一个侧边栏条目"],
+    ["toggleReviewPanel", "Toggle Changes Panel", "切换更改面板"],
+  ]) {
+    const source = `const command={id:\`codex.commandMenuTitle.${id}\`,defaultMessage:\`${from}\`};`;
+    const result = patchSource(source);
+    assert.ok(result.code.includes(`defaultMessage:\`${to}\``));
+    assert.equal(patchSource(result.code).code, result.code);
+  }
+}
+
+{
   const source = 'const menu=[{menuTitle:`New Project…`},{label:"New Project..."}];const message={id:`codex.commandMenuTitle.newProject`,defaultMessage:`New Project…`};const unrelated=`New Project…`;';
   const first = patchSource(source);
   assert.ok(first.code.includes('menuTitle:`新建项目…`'));
