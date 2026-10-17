@@ -75,9 +75,10 @@ function findTrashIcon(source) {
 function patchHover(source, node, trash) {
   let code = source.slice(node.start, node.end);
   if (code.includes("awaitBeforeOpen")) {
-    const props = /\{archive:([\w$]+),awaitBeforeOpen:/;
+    // 26.1013 adds archiveAriaLabel before awaitBeforeOpen; preserve the props.
+    const props = /\{archive:([\w$]+),/;
     if (!props.test(code)) throw new Error("native sidebar action props changed");
-    code = code.replace(props, "{archive:$1,deleteAction:CodexDeleteAction,awaitBeforeOpen:");
+    code = code.replace(props, "{archive:$1,deleteAction:CodexDeleteAction,");
     const empty = /if\(([^;]+)\)return null;/;
     if (!empty.test(code)) throw new Error("native sidebar empty-action guard changed");
     code = code.replace(empty, (_match, condition) => `if(${condition}&&CodexDeleteAction==null)return null;`);

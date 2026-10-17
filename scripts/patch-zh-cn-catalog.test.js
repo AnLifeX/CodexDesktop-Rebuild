@@ -99,7 +99,7 @@ test("translation specs cover current voice settings and shortcut messages", () 
   );
   const required = new Map();
   for (const name of fs.readdirSync(assetsDir)) {
-    if (!/^(?:app-initial|voice-settings)-.*\.js$/.test(name)) continue;
+    if (!name.endsWith(".js")) continue;
     const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
     for (const match of source.matchAll(
       /id:`([^`]+)`,defaultMessage:`([^`]*)`/g,
@@ -117,7 +117,14 @@ test("translation specs cover current voice settings and shortcut messages", () 
     }
   }
 
-  assert.ok(required.size > 40, "expected the current realtime voice catalog");
+  // Voice commands and picker messages can move into independent chunks.
+  for (const id of [
+    "codex.command.realtimeVoice.endCall",
+    "settings.general.realtimeVoice.choose",
+    "settings.general.realtimeVoiceHotkey.label",
+    "settings.general.realtimeVoiceScreenContext.label",
+    "settings.voice.general",
+  ]) assert.ok(required.has(id), `missing current voice message: ${id}`);
   for (const [messageId, defaultMessage] of required) {
     assert.ok(
       ZH_CN_TRANSLATIONS.has(messageId),
@@ -372,6 +379,10 @@ test("translation specs cover the confirmed keyboard shortcut rows", () => {
       "codex.commandDescription.composer.startDictation",
       "在当前输入框中开始听写",
     ],
+    ["codex.command.globalDictationHold", "听写快捷键"],
+    ["codex.commandDescription.globalDictationHold", "按住开始听写，松开结束。双击可免按听写，再按一下结束。"],
+    ["codex.command.globalDictationSingleTap", "单击听写"],
+    ["codex.commandDescription.globalDictationSingleTap", "单击开始或停止听写"],
     ["codex.command.composer.startVoiceMode", "切换语音模式"],
     [
       "codex.commandDescription.composer.startVoiceMode",
@@ -416,14 +427,26 @@ test("translation specs cover the confirmed keyboard shortcut rows", () => {
   );
   const currentIds = new Set();
   for (const name of fs.readdirSync(assetsDir)) {
-    if (!/^(?:app-initial|command-messages)-.*\.js$/.test(name)) continue;
+    if (!name.endsWith(".js")) continue;
     const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
     for (const match of source.matchAll(/id:`([^`]+)`,defaultMessage:`[^`]*`/g)) {
       if (expected.has(match[1])) currentIds.add(match[1]);
     }
   }
 
-  assert.deepEqual([...currentIds].sort(), [...expected.keys()].sort());
+  const dictationVariants = [
+    ["codex.command.composer.startDictation", "codex.commandDescription.composer.startDictation"],
+    ["codex.command.globalDictationHold", "codex.commandDescription.globalDictationHold",
+      "codex.command.globalDictationSingleTap", "codex.commandDescription.globalDictationSingleTap"],
+  ];
+  const dictationIds = new Set(dictationVariants.flat());
+  assert.deepEqual(
+    [...expected.keys()].filter(id => !dictationIds.has(id) && !currentIds.has(id)),
+    [],
+    "current shortcut rows must retain their translations",
+  );
+  assert.ok(dictationVariants.some(ids => ids.every(id => currentIds.has(id))),
+    "expected a complete composer or global dictation command group");
   for (const [messageId, translation] of expected) {
     assert.equal(ZH_CN_TRANSLATIONS.get(messageId), translation);
   }

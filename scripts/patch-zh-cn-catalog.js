@@ -205,6 +205,10 @@ const ZH_CN_TRANSLATION_SPECS = [
     "codex.commandDescription.composer.startDictation",
     "在当前输入框中开始听写",
   ],
+  ["codex.command.globalDictationHold", "听写快捷键"],
+  ["codex.commandDescription.globalDictationHold", "按住开始听写，松开结束。双击可免按听写，再按一下结束。"],
+  ["codex.command.globalDictationSingleTap", "单击听写"],
+  ["codex.commandDescription.globalDictationSingleTap", "单击开始或停止听写"],
   ["codex.command.composer.startVoiceMode", "切换语音模式"],
   [
     "codex.commandDescription.composer.startVoiceMode",
