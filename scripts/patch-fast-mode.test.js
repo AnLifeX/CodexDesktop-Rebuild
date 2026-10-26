@@ -64,6 +64,27 @@ test("rejects unknown independent-access request shapes before writing", () => {
   }
 });
 
+test("patches the 26.1016 Bedrock service-tier gates and remains idempotent", async () => {
+  const source = INDEPENDENT_ACCESS_FIXTURE
+    .replace("i?.authMethod===`personalAccessToken`", "i?.authMethod===`personalAccessToken`||i?.authMethod===`amazonBedrock`")
+    .replace("n!==`personalAccessToken`", "n!==`personalAccessToken`&&n!==`amazonBedrock`");
+  const candidate = { path: "webview/assets/app-initial-bedrock.js", fileName: "app-initial-bedrock.js", source };
+  const first = planFastModePlatform({ platform: "win", candidates: [candidate] });
+  const code = first.writes[0].result.code;
+  const { settings, request } = Function(`${code};return {settings:KVi,request:bga}`)();
+  assert.deepEqual(settings(), { serviceTierAccess: { fast: true, ultrafast: true }, isLoading: false });
+  assert.deepEqual(await request({}, "local"), { fast: true, ultrafast: true });
+  assert.equal(planFastModePlatform({ platform: "win", candidates: [{ ...candidate, source: code }] }).writes[0].result.code, code);
+  for (const unexpected of ["copilot", "apikey"]) {
+    const writes = [];
+    assert.throws(() => executeFastModePlatforms({
+      platformInputs: [{ platform: "win", candidates: [{ ...candidate, source: source.replaceAll("amazonBedrock", unexpected) }] }],
+      writeFile: (...args) => writes.push(args),
+    }), /fast-request|fast-settings|exact candidates|owned-malformed/i);
+    assert.equal(writes.length, 0);
+  }
+});
+
 test("removes the latest settings auth and account-query gates and is idempotent", () => {
   assert.equal(
     typeof patchFastModeSource,

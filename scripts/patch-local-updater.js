@@ -11,6 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const acorn = require("acorn");
 const { SRC_DIR } = require("./patch-util");
+const { windowsInstallLifecycle } = require("./windows-install-lifecycle");
 
 const DEFAULT_WINDOWS_UPDATE_URL =
   "https://github.com/anlifex/CodexDesktop-Rebuild/releases/download/windows-update-feed";
@@ -19,8 +20,8 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 11;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const LOCAL_UPDATER_CONTRACT_VERSION = 12;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";
@@ -256,6 +257,7 @@ ${versionLine}function CodexRebuildWindowsBootstrap(){
     return!1;
   }
   let {app,autoUpdater,dialog,ipcMain,BrowserWindow}=electron;
+  if((${windowsInstallLifecycle.toString()})(app,BrowserWindow))return!0;
 ${makeSquirrelLifecycleBlock(legacyLifecycle, detachedLifecycle, unboundedLifecycle)}
   app.whenReady().then(()=>CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWindow)).catch(e=>{try{console.warn('[CodexRebuildUpdater] setup failed',e&&e.message?e.message:e)}catch{}});
   return!1;
@@ -3047,7 +3049,7 @@ function validateLocalUpdaterSources({ packageSource, files, expectedUpdateUrl }
 
   const titlebarEvidence = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^webview\/assets\/(?:app-shell|app-initial)-.*\.js$/.test(fileName)) continue;
+    if (!/^webview\/assets\/(?:app-shell|app-initial|app-primary)-.*\.js$/.test(fileName)) continue;
     if (!hasTitlebarSignature(String(source || ""))) continue;
     let inspection;
     try {
@@ -3114,7 +3116,7 @@ function selectMainMenuTarget(normalizedFiles) {
 function selectTitlebarTarget(normalizedFiles) {
   const candidates = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^webview\/assets\/(?:app-shell|app-initial)-.*\.js$/.test(fileName)) continue;
+    if (!/^webview\/assets\/(?:app-shell|app-initial|app-primary)-.*\.js$/.test(fileName)) continue;
     if (hasTitlebarSignature(String(source || ""))) {
       try {
         candidates.push({ path: fileName, code: patchWebviewMenuBarCode(source) });
@@ -3255,7 +3257,7 @@ function collectLocalUpdaterSources(asarRoot) {
     }
   }
   for (const fileName of fs.readdirSync(assetsDir)) {
-    if (/^(?:app-shell|app-initial)-.*\.js$/.test(fileName)) {
+    if (/^(?:app-shell|app-initial|app-primary)-.*\.js$/.test(fileName)) {
       files[`webview/assets/${fileName}`] = fs.readFileSync(path.join(assetsDir, fileName), "utf-8");
     }
   }

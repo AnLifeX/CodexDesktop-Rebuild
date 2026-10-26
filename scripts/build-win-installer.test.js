@@ -31,6 +31,7 @@ assert.match(
   /packageJson\.codexRebuildPackageVersion \|\| packageJson\.version/,
   "Squirrel must prefer the zero-padded internal package version over the public rN version",
 );
+assert.ok(source.includes('path.join(PROJECT_ROOT, "scripts", "WindowsInstall.cs")'), "the recovery updater must include installation maintenance");
 assert.match(
   source,
   /copyRecursive\(sourceCuaNode, destinationCuaNode\)/,

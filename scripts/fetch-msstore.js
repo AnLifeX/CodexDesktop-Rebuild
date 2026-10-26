@@ -166,7 +166,7 @@ function makeGetUrlSoap(updateID, revisionNumber, ring) {
 
 // ─── HTTP 辅助 ───────────────────────────────────────────────────
 
-function httpsRequest(url, options = {}) {
+function httpsRequestOnce(url, options) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const reqOpts = {
@@ -178,6 +178,7 @@ function httpsRequest(url, options = {}) {
 
     const req = https.request(reqOpts, (res) => {
       const chunks = [];
+      res.on("error", reject);
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => {
         const body = Buffer.concat(chunks).toString("utf-8");
@@ -187,12 +188,26 @@ function httpsRequest(url, options = {}) {
 
     req.on("error", reject);
     req.setTimeout(30000, () => {
-      req.destroy(new Error("Request timeout"));
+      req.destroy(Object.assign(new Error("Request timeout"), { code: "ETIMEDOUT" }));
     });
 
     if (options.body) req.write(options.body);
     req.end();
   });
+}
+
+async function httpsRequest(url, options = {}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await httpsRequestOnce(url, options);
+      const transient = response.status === 408 || response.status === 429 ||
+        (response.status >= 500 && response.status < 600);
+      if (!transient || attempt === 2) return response;
+    } catch (error) {
+      if (attempt === 2 || !["ETIMEDOUT", "ECONNRESET", "EAI_AGAIN", "ECONNREFUSED"].includes(error.code)) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 1000));
+  }
 }
 
 function soapPost(url, body) {
