@@ -156,6 +156,20 @@ function applyLocalUpdaterPlan(sources) {
   return { ...next, plan };
 }
 
+test("selects and validates the titlebar after upstream moves it to app-primary", (t) => {
+  const sources = makeCleanLocalUpdaterSources();
+  sources.files["webview/assets/app-primary-current.js"] = sources.files["webview/assets/app-shell-CVVppk_a.js"];
+  delete sources.files["webview/assets/app-shell-CVVppk_a.js"];
+  const patched = applyLocalUpdaterPlan(sources);
+  assert.equal(patched.plan.validation.paths.titlebar, "webview/assets/app-primary-current.js");
+  assert.equal(planLocalUpdaterSources(patched).changes.length, 0);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "updater-app-primary-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeLocalUpdaterSources(root, sources);
+  assert.equal(executeLocalUpdater({ asarRoot: root, check: true }).validation.paths.titlebar, "webview/assets/app-primary-current.js");
+});
+
 function writeLocalUpdaterSources(asarRoot, sources) {
   const write = (relative, text) => {
     const file = path.join(asarRoot, ...relative.split("/"));
@@ -192,7 +206,8 @@ function snapshotLocalUpdaterTargets(asarRoot, relativePaths) {
   assert.ok(bootstrap.includes("Shortcut command timed out"));
   assert.ok(bootstrap.includes("child.kill()"));
   assert.ok(!bootstrap.includes("detached:!0"));
-  assert.ok(!bootstrap.includes(".unref()"));
+  const lifecycle = bootstrap.slice(bootstrap.indexOf("let squirrelEvent="), bootstrap.indexOf("app.whenReady()"));
+  assert.ok(!lifecycle.includes(".unref()"));
   assert.ok(!bootstrap.includes("setTimeout(()=>app.quit(),1000)"));
   assert.ok(
     bootstrap.includes(

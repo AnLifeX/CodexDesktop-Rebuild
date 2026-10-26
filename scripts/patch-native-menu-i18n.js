@@ -70,6 +70,7 @@ const COMPUTER_USE_OVERLAY_TRANSLATIONS = [
 ];
 
 const MENU_LABEL_TRANSLATIONS = [
+  ["New tab", "新建标签页"],
   ["File", "文件"],
   ["Edit", "编辑"],
   ["View", "视图"],
@@ -236,6 +237,7 @@ const COMMAND_TITLE_MESSAGE_SPECS = [
   ["newProject", "New Project..."],
   ["newThread", "New Task"],
   ["newThread", "New Chat"],
+  ["newTab", "New tab"],
   ["newWindow", "New Window"],
   ["nextThread", "Next Task"],
   ["nextThread", "Next Chat"],

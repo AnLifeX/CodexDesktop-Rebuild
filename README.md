@@ -105,6 +105,14 @@ $env:CODEX_REBUILD_UPDATE_PROXY_FIRST = "1"
 
 ## 下载与安装
 
+### Windows 安装目录
+
+应用名称保持 `Codex`。新构建安装根目录为 `%LOCALAPPDATA%\Programs\Codex`，对外使用固定的 `Codex.exe` 启动入口；`app-<版本号>` 作为 Squirrel 管理的内部版本目录保留。
+
+旧发布版在 `%LOCALAPPDATA%\Codex` 完成更新后，新版首次启动会完整校验复制并切换到新目录，无需独立过渡版本。主界面加载成功且稳定运行 30 秒后，旧版本和迁移源目录保留 24 小时，再由用户级计划任务清理；失败时保留源安装。实现与验收边界见 [Windows 安装目录规范](docs/windows-installation.md)。
+
+### 获取安装包
+
 进入 [最新版本下载页](https://github.com/AnLifeX/CodexDesktop-Rebuild/releases/latest)，Windows 发布通常包含三种文件：
 
 - `CodexSetup-win-x64-<版本>.zip`：安装版。解压后运行其中的安装程序，推荐日常使用，并由项目内更新器管理后续升级。
@@ -116,7 +124,7 @@ $env:CODEX_REBUILD_UPDATE_PROXY_FIRST = "1"
 
 从旧版本升级时，更新器会自动根据当前版本、残差链完整性和下载大小选择最合适的包，无需手动逐版安装。
 
-从本版本开始，安装包、full 包和 delta 包都包含 `CodexUpdater.exe`。正常安装或更新完成后，它会同步到 `%LOCALAPPDATA%\Codex\CodexUpdater.exe`，并随以后更新自动覆盖。若 Codex 无法启动，请先退出 Codex，再运行该文件；尚未内置该文件的历史版本只需下载上面的故障救援更新器，无需重新下载安装包。救援更新器同样通过 Squirrel 更新源选择 delta 或 full 包并完成安装。
+从本版本开始，安装包、full 包和 delta 包都包含 `CodexUpdater.exe`。正常安装或更新完成后，它会同步到安装根目录（新目录为 `%LOCALAPPDATA%\Programs\Codex`），并随以后更新自动覆盖。若 Codex 无法启动，请先退出 Codex，再运行该文件；尚未内置该文件的历史版本只需下载上面的故障救援更新器，无需重新下载安装包。救援更新器同样通过 Squirrel 更新源选择 delta 或 full 包并完成安装。
 
 ## 本地构建
 

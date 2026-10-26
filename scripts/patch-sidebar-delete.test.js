@@ -23,6 +23,11 @@ const SOURCE_1013 = NEW_SOURCE.replace(
   "archive:n,archiveAriaLabel:archiveLabel,awaitBeforeOpen:r,",
 );
 
+const SOURCE_1021 = SOURCE_1013
+  .replace("Ct=menu", "K=Re.disabled===!0,Ct=menu")
+  .replace("getMenuItems:E||Re.disabled===!0?", "getMenuItems:E||K?")
+  .replace("awaitBeforeOpen:void 0", "onBeforeOpen:K?void 0:prepareMenu,retainArchiveAction:false");
+
 test("adds only a hover action backed by the native delete item", () => {
   const first = patchSidebarSource(SOURCE);
   assert.equal(first.status, "patched");
@@ -73,7 +78,7 @@ test("requires the official delete menu item", () => {
 });
 
 test("click opens native confirmation with sync and async menus on both rails", async (t) => {
-  for (const [rail, source] of [["legacy", SOURCE], ["new", NEW_SOURCE], ["26.1013", SOURCE_1013]]) {
+  for (const [rail, source] of [["legacy", SOURCE], ["new", NEW_SOURCE], ["26.1013", SOURCE_1013], ["26.1021", SOURCE_1021]]) {
     for (const asynchronous of [false, true]) await t.test(`${rail}, async=${asynchronous}`, async () => {
       const patched = patchSidebarSource(source).code;
       let confirmations = 0;
@@ -88,6 +93,7 @@ test("click opens native confirmation with sync and async menus on both rails", 
         Actions: () => {},
         Archive: () => {},
         Icon: () => {},
+        prepareMenu: () => {},
         openNativeDeleteDialog: () => { confirmations += 1; },
       });
       vm.runInContext(patched + `;var menuItems=[{id:\`delete-thread\`,onSelect:openNativeDeleteDialog}];menu=${asynchronous ? "async" : ""}()=>menuItems;`, context);
@@ -99,8 +105,22 @@ test("click opens native confirmation with sync and async menus on both rails", 
       vm.runInContext("menuItems=[]", context);
       await action.onClick();
       assert.equal(confirmations, 1, "missing native item must not delete an ineligible thread");
+      if (rail === "26.1021") {
+        for (const blocked of [source.replace("E=false", "E=true"), source.replace("disabled:false", "disabled:true")]) {
+          vm.runInContext(patchSidebarSource(blocked).code, context);
+          assert.equal(vm.runInContext("Rail(Row().props.renderActions({}).props).props.actions.some(action=>action.id===`thread-delete-action`)", context), false);
+        }
+      }
     });
   }
+});
+
+test("preserves the 26.1021 disabled and work-mode gates", () => {
+  const patched = patchSidebarSource(SOURCE_1021);
+  assert.match(patched.code, /deleteAction:!E&&!K\?/);
+  assert.match(patched.code, /At=\(0\)\+\(!E&&!K\?1:0\)/);
+  assert.ok(patched.code.includes("onBeforeOpen:K?void 0:prepareMenu,retainArchiveAction:false"));
+  assert.equal(patchSidebarSource(patched.code).code, patched.code);
 });
 
 test("repairs the shipped synchronous callback on both rails and remains idempotent", () => {

@@ -21,6 +21,8 @@ internal static class CodexUpdater
     {
         try
         {
+            if (args.Length > 0 && args[0].StartsWith("--maintenance-", StringComparison.Ordinal))
+                return WindowsInstall.Run(args);
             if (!args.Contains("--temporary"))
             {
                 string temporary = Path.Combine(Path.GetTempPath(), "CodexUpdater-recovery-" + Guid.NewGuid().ToString("N") + ".exe");
@@ -157,13 +159,7 @@ internal static class CodexUpdater
             finally { CloseHandle(job); }
             Console.WriteLine("Update completed.");
 
-            string appExe = Directory.GetDirectories(root, "app-*")
-                .SelectMany(directory => new[] { "ChatGPT.exe", "Codex.exe" }
-                    .Select(name => Path.Combine(directory, name)))
-                .Where(File.Exists)
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-            if (appExe != null) Process.Start(new ProcessStartInfo(appExe) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(updateExe, "--processStart ChatGPT.exe") { UseShellExecute = false });
             return 0;
         }
         catch (Exception error)
@@ -177,8 +173,9 @@ internal static class CodexUpdater
         string directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         for (int depth = 0; depth < 3 && directory != null; depth++, directory = Path.GetDirectoryName(directory))
             if (File.Exists(Path.Combine(directory, "Update.exe"))) return directory;
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Codex");
-        return File.Exists(Path.Combine(root, "Update.exe")) ? root : null;
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return new[] { Path.Combine(local, "Programs", "Codex"), Path.Combine(local, "Codex") }
+            .FirstOrDefault(root => File.Exists(Path.Combine(root, "Update.exe")));
     }
 
     private static bool IsInstalledCodexPath(string root, string executable)

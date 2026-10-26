@@ -419,6 +419,7 @@ function buildRecoveryUpdater(appDirectory) {
     `/win32icon:${path.join(PROJECT_ROOT, "resources", "electron.ico")}`,
     `/out:${output}`,
     path.join(PROJECT_ROOT, "scripts", "CodexUpdater.cs"),
+    path.join(PROJECT_ROOT, "scripts", "WindowsInstall.cs"),
   ]);
   fs.mkdirSync(path.join(PROJECT_ROOT, "out"), { recursive: true });
   fs.copyFileSync(output, path.join(PROJECT_ROOT, "out", "CodexUpdater.exe"));
@@ -456,6 +457,35 @@ function markSquirrelAware(appDirectory, exeName) {
   resources.outputResource(executable);
   fs.writeFileSync(exePath, Buffer.from(executable.generate()));
   console.log(`   [ok] marked ${exeName} as Squirrel-aware`);
+}
+
+function buildSetupWrapper(outputDirectory, workspace, version) {
+  const lines = fs.readFileSync(path.join(outputDirectory, "RELEASES"), "utf8").trim().split(/\r?\n/);
+  const full = lines.filter(line => /^[a-f0-9]{40} Codex-\S+-full\.nupkg \d+$/i.test(line) && line.split(" ")[1] === `Codex-${version}-full.nupkg`);
+  if (full.length !== 1) throw new Error("Setup requires exactly one full package");
+  const [, name, size] = full[0].split(" ");
+  const packagePath = path.join(outputDirectory, name);
+  if (path.basename(name) !== name || fs.statSync(packagePath).size !== Number(size)) throw new Error("Setup full package is invalid");
+  const manifest = path.join(workspace, "setup-RELEASES");
+  fs.writeFileSync(manifest, full[0] + "\n");
+  const compiler = path.join(process.env.WINDIR || "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
+  const setup = path.join(workspace, "CodexSetup.exe");
+  run(compiler, ["/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll",
+    `/win32icon:${path.join(PROJECT_ROOT, "resources", "electron.ico")}`, `/out:${setup}`,
+    `/resource:${manifest},CodexReleases`, `/resource:${path.join(PROJECT_ROOT, "node_modules", "electron-winstaller", "vendor", "Squirrel.exe")},SquirrelUpdate`,
+    path.join(PROJECT_ROOT, "scripts", "CodexSetup.cs"), path.join(PROJECT_ROOT, "scripts", "WindowsInstall.cs")]);
+  const offset = fs.statSync(setup).size;
+  const input = fs.openSync(packagePath, "r"), output = fs.openSync(setup, "a");
+  try {
+    const buffer = Buffer.alloc(1024 * 1024);
+    let count;
+    while ((count = fs.readSync(input, buffer, 0, buffer.length, null)) > 0) fs.writeSync(output, buffer, 0, count);
+    const footer = Buffer.alloc(24);
+    footer.write("CDXSETUP"); footer.writeBigInt64LE(BigInt(offset), 8); footer.writeBigInt64LE(BigInt(size), 16);
+    fs.writeSync(output, footer);
+  } finally { fs.closeSync(input); fs.closeSync(output); }
+  fs.copyFileSync(setup, path.join(outputDirectory, "CodexSetup.exe"));
+  console.log("   [ok] Setup preserves installed versions and uses Programs\\Codex for fresh installs");
 }
 
 function resolveSquirrelReleaseOptions(env) {
@@ -532,6 +562,8 @@ async function main() {
     noDelta: squirrelReleaseOptions.noDelta,
     remoteReleases: squirrelReleaseOptions.remoteReleases,
   });
+
+  buildSetupWrapper(shortInstallerOut, shortWorkspace, installerVersion);
 
   const projectSquirrelDir = path.join(PROJECT_ROOT, "out", "make", "squirrel.windows", "x64");
   fs.rmSync(projectSquirrelDir, { recursive: true, force: true });

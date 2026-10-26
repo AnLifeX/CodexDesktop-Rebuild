@@ -144,7 +144,7 @@ function authComparisonOperand(node, source, operator, value) {
   return null;
 }
 
-function exactAuthPair(node, source, logicalOperator, comparisonOperator, secondAuth = APIKEY_AUTH) {
+function exactAuthPair(node, source, logicalOperator, comparisonOperator, secondAuth = APIKEY_AUTH, thirdAuth = "personalAccessToken") {
   if (node?.type !== "LogicalExpression" || node.operator !== logicalOperator) return null;
   const terms = flattenLogical(node, logicalOperator);
   if (terms.length < 2 || terms.length > 3) return null;
@@ -156,7 +156,7 @@ function exactAuthPair(node, source, logicalOperator, comparisonOperator, second
     .find(Boolean);
   if (chat == null || chat !== second) return null;
   if (terms.length === 3 && !terms.some((term) =>
-    authComparisonOperand(term, source, comparisonOperator, "personalAccessToken") === chat)) return null;
+    authComparisonOperand(term, source, comparisonOperator, thirdAuth) === chat)) return null;
   return chat;
 }
 
@@ -325,8 +325,8 @@ function collectServiceTierAccessTargets(ast, source) {
         settings ||= node.key.name === "serviceTierAccess" || isStringLiteral(node.key, "serviceTierAccess");
         loading ||= node.key.name === "isLoading" || isStringLiteral(node.key, "isLoading");
       }
-      if (node.type === "LogicalExpression" && flattenLogical(node, "||").length === 2 &&
-          exactAuthPair(node, source, "||", "===", "personalAccessToken") != null) auth = true;
+      if (node.type === "LogicalExpression" &&
+          exactAuthPair(node, source, "||", "===", "personalAccessToken", "amazonBedrock") != null) auth = true;
       if (node.type === "ConditionalExpression" && node.alternate.type === "Literal" &&
           node.alternate.value === null && node.consequent.type === "CallExpression" &&
           node.consequent.callee.type === "Identifier" && node.consequent.arguments.length === 1) {
@@ -346,8 +346,7 @@ function collectServiceTierAccessTargets(ast, source) {
     const result = statements[3]?.argument;
     if (gate.type !== "IfStatement" || gate.consequent.type !== "ReturnStatement" ||
         gate.consequent.argument?.type !== "Literal" || gate.consequent.argument.value !== null ||
-        flattenLogical(gate.test, "&&").length !== 2 ||
-        exactAuthPair(gate.test, source, "&&", "!==", "personalAccessToken") == null ||
+        exactAuthPair(gate.test, source, "&&", "!==", "personalAccessToken", "amazonBedrock") == null ||
         statements[3].type !== "ReturnStatement" || result?.type !== "SequenceExpression" ||
         result.expressions.length !== 2) continue;
     const [cache, decode] = result.expressions;

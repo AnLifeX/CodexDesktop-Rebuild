@@ -140,6 +140,19 @@ jobs:
 
       - name: Patch Windows app
         run: node scripts/patch-all.js win
+      - name: Verify Windows installation lifecycle
+        shell: pwsh
+        run: |
+          node --test scripts/windows-install-lifecycle.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh -NoProfile -File scripts/WindowsInstall.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh -NoProfile -File scripts/WindowsInstall.integration.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh -NoProfile -File scripts/CodexSetup.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh -NoProfile -File scripts/CodexUpdater.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows portable app
         run: npm run build:win-x64
 

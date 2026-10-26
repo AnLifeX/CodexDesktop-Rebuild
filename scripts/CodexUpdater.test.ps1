@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$updater = Add-Type -Path (Join-Path $PSScriptRoot 'CodexUpdater.cs') -PassThru |
+$updater = Add-Type -Path @((Join-Path $PSScriptRoot 'CodexUpdater.cs'), (Join-Path $PSScriptRoot 'WindowsInstall.cs')) -PassThru |
   Where-Object Name -eq 'CodexUpdater'
 $method = $updater.GetMethod('IsInstalledCodexPath', [System.Reflection.BindingFlags]'NonPublic, Static')
 $root = Join-Path $env:LOCALAPPDATA 'Codex'

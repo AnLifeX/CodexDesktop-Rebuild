@@ -132,11 +132,11 @@ function patchHover(source, node, trash) {
 
 function patchRow(source, node, hoverName) {
   let code = source.slice(node.start, node.end);
-  if (code.includes("awaitBeforeOpen")) {
-    const menu = code.match(/getMenuItems:([\w$]+)\|\|([\w$]+)\.disabled===!0\?\(\)=>?([\w$]+)\(`row-actions`\):void 0/);
+  if (code.includes("awaitBeforeOpen") || code.includes("retainArchiveAction")) {
+    const menu = code.match(/getMenuItems:([\w$]+)\|\|([\w$]+)(\.disabled===!0)?\?\(\)=>?([\w$]+)\(`row-actions`\):void 0/);
     if (!menu) throw new Error("native sidebar menu factory changed");
-    const [, workMode, props, menuFactory] = menu;
-    const condition = `!${workMode}&&${props}.disabled!==!0`;
+    const [, workMode, disabled, disabledProperty, menuFactory] = menu;
+    const condition = `!${workMode}&&${disabledProperty ? `${disabled}.disabled!==!0` : `!${disabled}`}`;
     const hoverCall = new RegExp(`\\)\\(${hoverName.replace(/[$]/g, "\\$")},\\{`);
     if (!hoverCall.test(code)) throw new Error("native sidebar action rail call changed");
     code = code.replace(hoverCall,
@@ -240,7 +240,7 @@ function patchSidebarSource(source) {
 function findTarget(platform) {
   const directory = path.join(SRC_DIR, platform, "_asar", "webview", "assets");
   if (!fs.existsSync(directory)) throw new Error(`missing sidebar assets for ${platform}`);
-  const candidates = fs.readdirSync(directory).filter((name) => /^app-initial-.*\.js$/.test(name)).flatMap((name) => {
+  const candidates = fs.readdirSync(directory).filter((name) => /^app-(?:initial|primary)-.*\.js$/.test(name)).flatMap((name) => {
     const file = path.join(directory, name);
     const source = fs.readFileSync(file, "utf8");
     return source.includes("thread-primary-action") && source.includes("id:`delete-thread`")
