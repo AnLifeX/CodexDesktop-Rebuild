@@ -106,7 +106,7 @@ try {
       }
       $shell = New-Object -ComObject WScript.Shell
       $link = $shell.CreateShortcut($shortcutPath)
-      if ($link.TargetPath -ne (Join-Path $target 'Codex.exe')) { throw 'Startup shortcut was not migrated' }
+      if ($link.TargetPath -ne (Join-Path $target 'Update.exe') -or $link.Arguments -ne '--processStart ChatGPT.exe') { throw 'Startup shortcut was not migrated' }
       [Runtime.InteropServices.Marshal]::FinalReleaseComObject($link) | Out-Null
       [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
       $task = Get-ScheduledTask -TaskName $taskName

@@ -146,6 +146,7 @@ public static class WindowsInstall
     internal static void Retain(string root, string current)
     {
         AppPath(root, current);
+        SyncRootFiles(root, current);
         State state = Load(root);
         if (state.CurrentApp != current) { state.CurrentApp = current; state.HealthyUtc = 0; }
         foreach (string directory in Directory.GetDirectories(root, "app-*"))
@@ -245,7 +246,7 @@ public static class WindowsInstall
                 string exeName = File.Exists(Path.Combine(target, current, "ChatGPT.exe")) ? "ChatGPT.exe" : "Codex.exe";
                 using (var app = Start(Path.Combine(target, current, exeName), appArguments))
                 {
-                    deadline = DateTime.UtcNow.AddMinutes(3);
+                    deadline = DateTime.UtcNow.AddMinutes(10);
                     while (DateTime.UtcNow < deadline)
                     {
                         State confirmation = Load(target);
@@ -447,6 +448,18 @@ public static class WindowsInstall
         }
     }
 
+    internal static void SyncRootFiles(string root, string current)
+    {
+        string app = AppPath(root, current);
+        // Squirrel hooks can be skipped by an older bootstrap; ordinary startup repairs these too.
+        foreach (string file in Directory.GetFiles(app, "*.manifest").Concat(new[] { Path.Combine(app, "CodexUpdater.exe") }))
+        {
+            if (!File.Exists(file)) continue;
+            string destination = Path.Combine(root, Path.GetFileName(file));
+            if (!File.Exists(destination) || FileHash(file) != FileHash(destination)) File.Copy(file, destination, true);
+        }
+    }
+
     internal static IEnumerable<string> ShortcutFolders()
     {
         return new[] { Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), Environment.GetFolderPath(Environment.SpecialFolder.Startup), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar") }.Distinct();
@@ -472,12 +485,17 @@ public static class WindowsInstall
             if (current == null && string.IsNullOrWhiteSpace(oldTarget)) return;
             if (current == null && !IsInside(source, oldTarget) && !IsInside(target, oldTarget)) return;
             bool application = new[] { "Codex.exe", "ChatGPT.exe", "Update.exe" }.Contains(Path.GetFileName(oldTarget), StringComparer.OrdinalIgnoreCase);
-            Invoke(link, "TargetPath", BindingFlags.SetProperty, current != null || application ? Path.Combine(target, "Codex.exe") : ReplaceRootReference(oldTarget, source, target));
+            Invoke(link, "TargetPath", BindingFlags.SetProperty, current != null || application ? Path.Combine(target, "Update.exe") : ReplaceRootReference(oldTarget, source, target));
             string arguments = (string)Invoke(link, "Arguments", BindingFlags.GetProperty);
-            if (Path.GetFileName(oldTarget).Equals("Update.exe", StringComparison.OrdinalIgnoreCase)) arguments = "";
+            if (current != null || application)
+            {
+                bool updater = Path.GetFileName(oldTarget).Equals("Update.exe", StringComparison.OrdinalIgnoreCase);
+                arguments = updater && arguments.Contains("--processStart") ? arguments :
+                    "--processStart ChatGPT.exe" + (string.IsNullOrWhiteSpace(arguments) ? "" : " --process-start-args " + Quote(arguments));
+            }
             Invoke(link, "Arguments", BindingFlags.SetProperty, ReplaceRootReference(arguments, source, target));
             Invoke(link, "WorkingDirectory", BindingFlags.SetProperty, target);
-            Invoke(link, "IconLocation", BindingFlags.SetProperty, Path.Combine(target, "Codex.exe") + ",0");
+            Invoke(link, "IconLocation", BindingFlags.SetProperty, Path.Combine(target, "ChatGPT.exe") + ",0");
             Invoke(link, "Save", BindingFlags.InvokeMethod);
         }
         finally
