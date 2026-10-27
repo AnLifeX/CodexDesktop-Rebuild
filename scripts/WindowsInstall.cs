@@ -146,13 +146,15 @@ public static class WindowsInstall
     internal static void Retain(string root, string current)
     {
         AppPath(root, current);
+        if (Superseded(root, current)) return;
         SyncRootFiles(root, current);
         State state = Load(root);
         if (state.CurrentApp != current) { state.CurrentApp = current; state.HealthyUtc = 0; }
+        state.Versions.RemoveAll(item => Path.GetFileName(item.RelativePath) == current);
         foreach (string directory in Directory.GetDirectories(root, "app-*"))
         {
             string name = Path.GetFileName(directory);
-            if (name == current) continue;
+            if (CompareApps(name, current) >= 0) continue;
             AppPath(root, name);
             Retired retired = state.Versions.FirstOrDefault(item => item.RelativePath == name);
             if (retired == null) { retired = new Retired { RelativePath = name }; state.Versions.Add(retired); }
@@ -178,10 +180,10 @@ public static class WindowsInstall
 
     internal static void Confirm(string root, string current)
     {
+        if (Superseded(root, current)) return;
         string directory = AppPath(root, current);
         if (!File.Exists(Path.Combine(directory, "resources", "app.asar"))) throw new IOException("Application resources are incomplete.");
         State state = Load(root);
-        if (state.CurrentApp != null && state.CurrentApp != current) return;
         Retain(root, current);
         state = Load(root);
         if (state.HealthyUtc == 0)
@@ -197,15 +199,43 @@ public static class WindowsInstall
             UpdateReferences(state.LegacyRoot, root);
         }
         EnsureFixedShortcuts(root, current);
-        if (!string.IsNullOrEmpty(state.LegacyRoot))
+        if (!string.IsNullOrEmpty(state.LegacyRoot) && !state.MigrationCommitted)
         {
-            File.WriteAllText(Path.Combine(state.LegacyRoot, ".codex-migrated"), root);
+            if (Directory.Exists(state.LegacyRoot)) File.WriteAllText(Path.Combine(state.LegacyRoot, ".codex-migrated"), root);
             state.MigrationCommitted = true;
         }
+        if (state.MigrationCommitted && !string.IsNullOrEmpty(state.LegacyRoot) && !Directory.Exists(state.LegacyRoot)) state.LegacyRoot = null;
         Save(root, state);
         try { ScheduleCleanup(root, state); }
         catch (Exception error) { File.AppendAllText(Path.Combine(root, "CodexInstall.log"), "Cleanup scheduling failed; will retry on launch: " + error.Message + Environment.NewLine); }
         Cleanup(root, DateTime.UtcNow.Ticks);
+    }
+
+    internal static int CompareApps(string left, string right)
+    {
+        Func<string, long[]> parts = name => {
+            var match = System.Text.RegularExpressions.Regex.Match(name, @"^app-(\d+)\.(\d+)\.(\d+)(?:-(?:r|rebuild)(\d+))?$");
+            if (!match.Success) throw new IOException("Invalid application version: " + name);
+            return new[] { long.Parse(match.Groups[1].Value), long.Parse(match.Groups[2].Value), long.Parse(match.Groups[3].Value), match.Groups[4].Success ? long.Parse(match.Groups[4].Value) : long.MaxValue };
+        };
+        long[] a = parts(left), b = parts(right);
+        for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return a[i].CompareTo(b[i]);
+        return 0;
+    }
+
+    internal static bool Superseded(string root, string current)
+    {
+        State state = Load(root);
+        if (state.CurrentApp != null && CompareApps(state.CurrentApp, current) > 0) return true;
+        foreach (string directory in Directory.GetDirectories(root, "app-*"))
+            if (CompareApps(Path.GetFileName(directory), current) > 0) return true;
+        string releases = Path.Combine(root, "packages", "RELEASES");
+        if (File.Exists(releases)) foreach (string line in File.ReadAllLines(releases))
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(line.Trim('\uFEFF', ' ', '\r', '\n'), @"^[a-fA-F0-9]{40}\s+Codex-(\d+\.\d+\.\d+(?:-rebuild\d+|-r\d+)?)(?:-full|-delta)?\.nupkg\s+\d+$");
+            if (match.Success && CompareApps("app-" + match.Groups[1].Value, current) > 0) return true;
+        }
+        return false;
     }
 
     internal static void Migrate(string source, string current, int parentPid, string[] appArguments)

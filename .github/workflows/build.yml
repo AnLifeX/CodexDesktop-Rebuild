@@ -160,7 +160,7 @@ jobs:
       - name: Verify Windows installation lifecycle
         shell: pwsh
         run: |
-          node --test scripts/windows-install-lifecycle.test.js
+          node --test scripts/windows-install-lifecycle.test.js scripts/patch-windows-log-path.test.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pwsh -NoProfile -File scripts/WindowsInstall.test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
