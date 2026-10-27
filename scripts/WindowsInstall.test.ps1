@@ -69,6 +69,17 @@ public static class InstallTests
         Check(WindowsInstall.Quote("a\"b") == "\"a\\\"b\"", "Quote escaping is wrong");
         Check(WindowsInstall.ReplaceRootReference("C:\\Local\\CodexOther\\run.exe", "C:\\Local\\Codex", "C:\\New\\Codex") == "C:\\Local\\CodexOther\\run.exe", "Sibling installation reference was changed");
         Check(WindowsInstall.ReplaceRootReference("\"C:\\Local\\Codex\\run.exe\" --start", "C:\\Local\\Codex", "C:\\New\\Codex") == "\"C:\\New\\Codex\\run.exe\" --start", "Installation reference was not changed");
+        Check(WindowsInstall.CompareApps("app-26.1021.31346-rebuild0001", "app-26.1021.31345") > 0, "r1 must sort after official version");
+        Check(WindowsInstall.CompareApps("app-26.1021.31346", "app-26.1021.31346-rebuild0001") > 0, "Next official version must sort after r1");
+        var before = File.ReadAllText(Path.Combine(root, WindowsInstall.StateFile));
+        WindowsInstall.Retain(root, "app-2.0.0");
+        WindowsInstall.Confirm(root, "app-2.0.0");
+        Check(Directory.Exists(newer), "An old process retired a newer installed version");
+        Check(File.ReadAllText(Path.Combine(root, WindowsInstall.StateFile)) == before, "An old process changed installation state");
+        Directory.Delete(newer);
+        File.WriteAllText(Path.Combine(root, "packages", "RELEASES"), new string('A', 40) + " Codex-2.0.1-rebuild0001.nupkg 123\n");
+        WindowsInstall.Retain(root, "app-2.0.0");
+        Check(File.ReadAllText(Path.Combine(root, WindowsInstall.StateFile)) == before, "Old process ignored newer manifest version");
     }
 }
 '@
