@@ -443,9 +443,19 @@ public static class WindowsInstall
         foreach (string folder in ShortcutFolders())
         {
             if (!Directory.Exists(folder)) continue;
-            foreach (string file in Directory.GetFiles(folder, "*.lnk", SearchOption.AllDirectories))
+            foreach (string file in ShortcutFiles(folder))
                 EditShortcut(file, source, target, null);
         }
+    }
+
+    internal static IEnumerable<string> ShortcutFiles(string folder)
+    {
+        // Windows Start Menu includes denied compatibility junctions such as 程序.
+        if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) yield break;
+        foreach (string file in Directory.GetFiles(folder, "*.lnk"))
+            if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0) yield return file;
+        foreach (string child in Directory.GetDirectories(folder))
+            foreach (string file in ShortcutFiles(child)) yield return file;
     }
 
     internal static void SyncRootFiles(string root, string current)

@@ -87,6 +87,16 @@ try {
   try { $method.Invoke($null, @($linked, (Join-Path $temporary 'junction-copy'))) } catch { $rejected = $true }
   if (-not $rejected -or -not (Test-Path -LiteralPath (Join-Path $outside 'sentinel'))) { throw 'Junction boundary was not protected' }
   Remove-Item -LiteralPath $linked
+  $menu = Join-Path $temporary 'menu'
+  New-Item -ItemType Directory -Path (Join-Path $menu 'Programs') | Out-Null
+  Set-Content -LiteralPath (Join-Path $menu 'Programs\Codex.lnk') -Value 'shortcut'
+  Set-Content -LiteralPath (Join-Path $outside 'outside.lnk') -Value 'unrelated'
+  $linked = Join-Path $menu '程序'
+  New-Item -ItemType Junction -Path $linked -Target $outside | Out-Null
+  $enumerate = [WindowsInstall].GetMethod('ShortcutFiles', [Reflection.BindingFlags]'NonPublic, Static')
+  $shortcuts = @($enumerate.Invoke($null, [object[]]@([string]$menu)))
+  if ($shortcuts.Count -ne 1 -or $shortcuts[0] -ne (Join-Path $menu 'Programs\Codex.lnk')) { throw 'Shortcut scan followed a compatibility junction or missed real Programs' }
+  Remove-Item -LiteralPath $linked
   Write-Output 'Windows install: full copy/hash verification, 24-hour boundary, unconfirmed startup, current/pending protection, path traversal, and junction checks passed'
 } finally {
   $resolved = [IO.Path]::GetFullPath($temporary)
