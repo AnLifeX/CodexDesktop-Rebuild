@@ -45,36 +45,56 @@ function windowsInstallLifecycle(app, BrowserWindow) {
       }
     }
   }
-  let confirmed = false;
+  let confirmed = false, confirming = false;
   const observe = window => {
     if (!window?.webContents || window.isDestroyed()) return;
-    let timer;
-    const cancel = () => { if (timer) clearTimeout(timer); timer = null; };
+    let timer, generation = 0;
+    const cancel = () => { generation++; if (timer) clearTimeout(timer); timer = null; };
     window.webContents.on("render-process-gone", cancel);
-    window.webContents.on("did-start-loading", cancel);
-    window.webContents.on("did-fail-load", cancel);
+    window.webContents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) cancel(); });
+    window.webContents.on("did-fail-load", (_event, _code, _description, _url, mainFrame) => { if (mainFrame) cancel(); });
     window.on("closed", cancel);
-    window.webContents.on("did-finish-load", () => {
+    const loaded = () => {
       cancel();
       const url = window.webContents.getURL().split(/[?#]/)[0];
       // Updater dialogs and DevTools must not confirm the application is healthy.
       const indexFile = require("node:url").pathToFileURL(path.join(app.getAppPath(), "webview", "index.html")).href;
       if (url !== "app://-/index.html" && url !== indexFile) return;
-      timer = setTimeout(async () => {
+      const observed = generation;
+      const schedule = delay => { timer = setTimeout(check, delay); timer.unref?.(); };
+      const check = async () => {
         if (confirmed || window.isDestroyed() || window.webContents.isDestroyed()) return;
+        if (confirming) { schedule(5000); return; }
+        let rendered = false;
         try {
-          if (!await window.webContents.executeJavaScript("document.readyState==='complete'&&!!document.body&&document.body.innerText.trim().length>0")) return;
-        } catch { return; }
-        if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+          rendered = await window.webContents.executeJavaScript("document.readyState==='complete'&&!!document.querySelector('#root')?.firstElementChild&&!!document.body&&document.body.innerText.trim().length>0");
+        } catch {}
+        if (generation !== observed || window.isDestroyed() || window.webContents.isDestroyed()) return;
+        // The UI can populate after did-finish-load; subframe loads must not cancel confirmation.
+        if (!rendered) { schedule(5000); return; }
+        confirming = true;
         const child = cp.spawn(helper, ["--maintenance-confirm", root, current], { windowsHide: true, stdio: "ignore" });
-        child.on("error", error => console.warn("[CodexInstall] Startup confirmation failed", error));
-        child.once("spawn", () => { confirmed = true; });
+        let settled = false;
+        const finish = error => {
+          if (settled) return;
+          settled = true; confirming = false;
+          if (!error) confirmed = true;
+          else {
+            console.warn("[CodexInstall] Startup confirmation failed", error);
+            if (generation === observed && !window.isDestroyed()) schedule(5000);
+          }
+        };
+        child.once("error", finish);
+        child.once("exit", code => finish(code === 0 ? null : new Error(`Confirmation exited with code ${code}`)));
         child.unref();
-      }, 30000);
-      timer.unref?.();
-    });
+      };
+      schedule(30000);
+    };
+    window.webContents.on("did-finish-load", loaded);
+    if (!window.webContents.isLoadingMainFrame?.()) loaded();
   };
   app.on("browser-window-created", (_event, window) => observe(window));
+  for (const window of BrowserWindow.getAllWindows?.() || []) observe(window);
   return false;
 }
 

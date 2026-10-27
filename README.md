@@ -107,7 +107,7 @@ $env:CODEX_REBUILD_UPDATE_PROXY_FIRST = "1"
 
 ### Windows 安装目录
 
-应用名称保持 `Codex`。新构建安装根目录为 `%LOCALAPPDATA%\Programs\Codex`，对外使用固定的 `Codex.exe` 启动入口；`app-<版本号>` 作为 Squirrel 管理的内部版本目录保留。
+应用名称保持 `Codex`。新构建安装根目录为 `%LOCALAPPDATA%\Programs\Codex`，保留固定的 `Codex.exe` 兼容入口，快捷方式使用根目录 `Update.exe --processStart ChatGPT.exe` 启动当前版本；`app-<版本号>` 作为 Squirrel 管理的内部版本目录保留。
 
 旧发布版在 `%LOCALAPPDATA%\Codex` 完成更新后，新版首次启动会完整校验复制并切换到新目录，无需独立过渡版本。主界面加载成功且稳定运行 30 秒后，旧版本和迁移源目录保留 24 小时，再由用户级计划任务清理；失败时保留源安装。实现与验收边界见 [Windows 安装目录规范](docs/windows-installation.md)。
 

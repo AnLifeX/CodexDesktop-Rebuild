@@ -20,8 +20,8 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 12;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const LOCAL_UPDATER_CONTRACT_VERSION = 13;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";

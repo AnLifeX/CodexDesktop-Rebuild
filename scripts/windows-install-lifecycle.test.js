@@ -34,7 +34,7 @@ function fixture(t, { legacy = false, event, targetExists = false } = {}) {
     clearTimeout(timer) { timers.delete(timer); },
   };
   const run = vm.runInNewContext(`(${windowsInstallLifecycle.toString()})`, context);
-  return { local, root, appDir, app, processMock, calls, children, timers, run: () => run(app, {}) };
+  return { local, root, appDir, app, processMock, calls, children, timers, run: (windows = []) => run(app, { getAllWindows: () => windows }) };
 }
 
 function windowFixture(f, { url = "app://-/index.html", rendered = true } = {}) {
@@ -90,15 +90,53 @@ test("only the rendered application stable for 30 seconds confirms startup", asy
 });
 
 test("a crash, navigation, failed load, or blank renderer never starts the retirement clock", async t => {
-  for (const event of ["render-process-gone", "did-start-loading", "did-fail-load"]) {
+  for (const event of ["render-process-gone", "did-start-navigation", "did-fail-load"]) {
     const f = fixture(t); f.run(); const window = windowFixture(f);
-    window.webContents.emit(event);
+    window.webContents.emit(event, {}, 0, false, "app://-/index.html", true);
+    if (event === "did-start-navigation") window.webContents.emit(event, {}, "app://-/other", false, true);
     assert.equal(f.timers.size, 0);
     assert.equal(f.calls.length, 0);
   }
   const f = fixture(t); f.run(); windowFixture(f, { rendered: false });
   await [...f.timers][0].callback();
   assert.equal(f.calls.length, 0);
+});
+
+test("late renderer content and a failed confirmation are retried; only successful exit confirms", async t => {
+  const f = fixture(t); f.run(); const window = windowFixture(f, { rendered: false });
+  await [...f.timers][0].callback();
+  assert.equal([...f.timers].at(-1).delay, 5000);
+  window.webContents.executeJavaScript = async () => true;
+  await [...f.timers].at(-1).callback();
+  f.children[0].emit("spawn"); f.children[0].emit("exit", 1);
+  await [...f.timers].at(-1).callback();
+  assert.equal(f.children.length, 2);
+  f.children[1].emit("exit", 0);
+  await [...f.timers].at(-1).callback();
+  assert.equal(f.children.length, 2);
+});
+
+test("subframe loading does not cancel main-window confirmation", async t => {
+  const f = fixture(t); f.run(); const window = windowFixture(f);
+  window.webContents.emit("did-start-loading");
+  window.webContents.emit("did-start-navigation", {}, "https://example.com", false, false);
+  window.webContents.emit("did-fail-load", {}, -3, "cancelled", "https://example.com", false);
+  assert.equal(f.timers.size, 1);
+  await [...f.timers][0].callback();
+  assert.equal(f.children.length, 1);
+});
+
+test("an already loaded window is observed and main navigation during inspection cancels confirmation", async t => {
+  const f = fixture(t); const window = windowFixture(f);
+  f.run([window]);
+  assert.equal(f.timers.size, 1);
+  window.webContents.executeJavaScript = async () => {
+    window.webContents.emit("did-start-navigation", {}, "app://-/other", false, true);
+    return true;
+  };
+  await [...f.timers][0].callback();
+  assert.equal(f.children.length, 0);
+  assert.equal(f.timers.size, 0);
 });
 
 test("uninstall removes the cleanup task and portable apps do not migrate", t => {

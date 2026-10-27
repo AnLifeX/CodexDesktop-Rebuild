@@ -22,12 +22,17 @@ public static class InstallTests
         Directory.CreateDirectory(old);
         File.WriteAllText(Path.Combine(current, "resources", "app.asar"), "current resources");
         File.WriteAllText(Path.Combine(current, "ChatGPT.exe"), "current executable");
+        File.WriteAllText(Path.Combine(current, "CodexUpdater.exe"), "new rescue updater");
+        File.WriteAllText(Path.Combine(root, "CodexUpdater.exe"), "outdated rescue updater");
+        File.WriteAllText(Path.Combine(current, "156.0.0.0.manifest"), "current manifest");
         File.WriteAllText(Path.Combine(old, "old.exe"), "retained");
         File.WriteAllText(Path.Combine(root, ".custom-hidden"), "user file");
         Directory.CreateDirectory(Path.Combine(root, "packages", "empty"));
         File.WriteAllText(Path.Combine(root, "packages", "RELEASES"), "package manifest");
         File.WriteAllText(Path.Combine(root, "packages", "custom.nupkg"), "package bytes");
         WindowsInstall.Retain(root, "app-2.0.0");
+        Check(File.ReadAllText(Path.Combine(root, "CodexUpdater.exe")) == "new rescue updater", "Root rescue updater stayed outdated");
+        Check(File.ReadAllText(Path.Combine(root, "156.0.0.0.manifest")) == "current manifest", "Root launch manifest was missed");
         var state = WindowsInstall.Load(root);
         Check(state.HealthyUtc == 0 && state.Versions.Count == 1, "Retention started before successful launch");
         string retained = WindowsInstall.RetiredPath(root, state.Versions[0].RelativePath);
