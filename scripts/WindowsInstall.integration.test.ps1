@@ -80,6 +80,9 @@ try {
     $key.SetValue('InstallLocation', $root)
     $key.SetValue('UninstallString', "`"$root\Update.exe`" --uninstall")
     $key.Close()
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("$registryPrefix\Classes\codex\shell\open\command")
+    $key.SetValue('', '"D:\historical-portable\Codex.exe" "%1"')
+    $key.Close()
     $shell = New-Object -ComObject WScript.Shell
     $shortcutPath = Join-Path $local 'Startup\Codex.lnk'
     $link = $shell.CreateShortcut($shortcutPath)
@@ -101,6 +104,12 @@ try {
     $actualLocation = $key.GetValue('InstallLocation'); $key.Close()
     if ($scenario -eq 'success') {
       if ($actualLocation -ne $target) { throw 'Uninstall registration was not migrated' }
+      $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$registryPrefix\Classes\codex\shell\open\command")
+      $command = $key.GetValue(''); $key.Close()
+      if ($command -ne "`"$target\Codex.exe`" `"%1`"") { throw 'Historical portable protocol registration was not repaired' }
+      $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$registryPrefix\App Paths\Codex.exe")
+      $entry = $key.GetValue(''); $key.Close()
+      if ($entry -ne (Join-Path $target 'Codex.exe')) { throw 'App Paths still points outside the current installation' }
       foreach ($file in @('.custom', 'packages\complete.nupkg', 'update-cache\partial', 'app-2.0.0\resources\app.asar')) {
         if ([IO.File]::ReadAllText((Join-Path $root $file)) -ne [IO.File]::ReadAllText((Join-Path $target $file))) { throw "Migration lost $file" }
       }
@@ -123,6 +132,26 @@ try {
       $cleanup = Start-Process -FilePath $fixtureExe -ArgumentList @('--age', "`"$target`"") -WindowStyle Hidden -Wait -PassThru
       if ($cleanup.ExitCode -ne 0 -or (Test-Path -LiteralPath $retired)) { throw 'Cleanup did not retry after the retired process exited' }
       if (-not (Test-Path -LiteralPath (Join-Path $target 'app-2.0.0\resources\app.asar'))) { throw 'Cleanup removed current resources' }
+      # A backup restored after first healthy start still needs an expiration; a removed legacy root stays absent.
+      New-Item -ItemType Directory -Path (Join-Path $target 'app-0.5.0') | Out-Null
+      $shell = New-Object -ComObject WScript.Shell
+      $link = $shell.CreateShortcut($shortcutPath)
+      $link.TargetPath = Join-Path $target 'ChatGPT.exe'
+      $link.Arguments = ''
+      $link.WorkingDirectory = Join-Path $target 'app-1.0.0'
+      $link.Save()
+      [Runtime.InteropServices.Marshal]::FinalReleaseComObject($link) | Out-Null
+      [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
+      & $fixtureExe --maintenance-confirm $target app-2.0.0
+      if ($LASTEXITCODE -ne 0) { throw 'Repeated confirmation failed after legacy root removal' }
+      [xml]$state = Get-Content -LiteralPath (Join-Path $target '.codex-install.xml')
+      if (@($state.State.Versions.Retired | Where-Object { $_ -and [long]$_.ExpiresUtc -le 0 }).Count -gt 0) { throw 'Late restored backup has no expiry' }
+      if (Test-Path -LiteralPath $root) { throw 'Repeated confirmation recreated the removed legacy root' }
+      $shell = New-Object -ComObject WScript.Shell
+      $link = $shell.CreateShortcut($shortcutPath)
+      if ($link.TargetPath -ne (Join-Path $target 'Update.exe') -or $link.WorkingDirectory -ne $target) { throw 'Post-migration update left a shortcut tied to an old version directory' }
+      [Runtime.InteropServices.Marshal]::FinalReleaseComObject($link) | Out-Null
+      [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
     } else {
       if ($actualLocation -ne $root -or -not (Test-Path -LiteralPath (Join-Path $root '.custom'))) { throw 'Failed migration damaged source installation' }
     }
