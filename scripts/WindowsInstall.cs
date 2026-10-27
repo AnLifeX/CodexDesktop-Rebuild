@@ -186,19 +186,15 @@ public static class WindowsInstall
         State state = Load(root);
         Retain(root, current);
         state = Load(root);
-        if (state.HealthyUtc == 0)
-        {
-            state.HealthyUtc = DateTime.UtcNow.Ticks;
-            foreach (var retired in state.Versions) if (retired.ExpiresUtc == 0) retired.ExpiresUtc = state.HealthyUtc + Retention.Ticks;
-        }
-        if (!string.IsNullOrEmpty(state.LegacyRoot) && !state.MigrationCommitted)
+        if (state.HealthyUtc == 0) state.HealthyUtc = DateTime.UtcNow.Ticks;
+        foreach (var retired in state.Versions) if (retired.ExpiresUtc == 0) retired.ExpiresUtc = state.HealthyUtc + Retention.Ticks;
+        if (!string.IsNullOrEmpty(state.LegacyRoot))
         {
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (!SamePath(root, Path.Combine(local, "Programs", "Codex")) || !SamePath(state.LegacyRoot, Path.Combine(local, "Codex")))
                 throw new IOException("Migration source is invalid.");
-            UpdateReferences(state.LegacyRoot, root);
         }
-        EnsureFixedShortcuts(root, current);
+        EnsureFixedShortcuts(root, current, state.LegacyRoot);
         if (!string.IsNullOrEmpty(state.LegacyRoot) && !state.MigrationCommitted)
         {
             if (Directory.Exists(state.LegacyRoot)) File.WriteAllText(Path.Combine(state.LegacyRoot, ".codex-migrated"), root);
@@ -545,11 +541,31 @@ public static class WindowsInstall
         }
     }
 
-    internal static void EnsureFixedShortcuts(string root, string current)
+    internal static void EnsureFixedShortcuts(string root, string current, string source = null)
     {
+        UpdateReferences(source ?? root, root);
+        RepairLaunchRegistration(root);
         EditShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Codex.lnk"), root, root, current);
         string menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Codex");
         Directory.CreateDirectory(menu);
         EditShortcut(Path.Combine(menu, "Codex.lnk"), root, root, current);
+    }
+
+    internal static void RepairLaunchRegistration(string root)
+    {
+        // Historical portable installations can register paths outside either known install root.
+        using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\codex"))
+        {
+            key.SetValue("", "URL:Codex Protocol");
+            key.SetValue("URL Protocol", "");
+        }
+        using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\codex\shell\open\command"))
+            key.SetValue("", Quote(Path.Combine(root, "Codex.exe")) + " \"%1\"");
+        foreach (string name in new[] { "Codex.exe", "ChatGPT.exe" })
+        using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\" + name))
+        {
+            key.SetValue("", Path.Combine(root, name));
+            key.SetValue("Path", root);
+        }
     }
 }
