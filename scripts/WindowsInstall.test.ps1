@@ -53,12 +53,18 @@ public static class InstallTests
         long healthy = DateTime.UtcNow.Ticks;
         state.HealthyUtc = healthy;
         state.Versions[0].ExpiresUtc = healthy + WindowsInstall.Retention.Ticks;
+        Check(WindowsInstall.CleanupDue(state, healthy).Value.Ticks == healthy + WindowsInstall.Retention.Ticks, "Cleanup was scheduled before expiry");
+        Check(WindowsInstall.CleanupDue(state, healthy + WindowsInstall.Retention.Ticks).Value.Ticks == healthy + WindowsInstall.Retention.Ticks + TimeSpan.FromHours(1).Ticks, "Expired files must retry in an hour");
+        state.Versions.Add(new WindowsInstall.Retired { RelativePath = "app-0.5.0", ExpiresUtc = healthy + TimeSpan.FromHours(25).Ticks });
+        Check(WindowsInstall.CleanupDue(state, healthy + TimeSpan.FromHours(24.5).Ticks).Value.Ticks == healthy + TimeSpan.FromHours(25).Ticks, "Retry skipped the next future deadline");
+        state.Versions.RemoveAt(1);
         WindowsInstall.Save(root, state);
         WindowsInstall.CleanupFiles(root, state, healthy + TimeSpan.FromHours(23).Ticks);
         Check(Directory.Exists(retained), "Old version removed before 24 hours");
         string newer = Path.Combine(root, "app-3.0.0"); Directory.CreateDirectory(newer);
         WindowsInstall.CleanupFiles(root, state, healthy + TimeSpan.FromHours(24).Ticks);
         Check(!Directory.Exists(retained), "Expired version was not removed");
+        Check(!WindowsInstall.CleanupDue(state, healthy + WindowsInstall.Retention.Ticks).HasValue, "Empty cleanup retained a scheduled deadline");
         Check(Directory.Exists(current) && Directory.Exists(newer), "Current or pending version was removed");
         Check(File.ReadAllText(Path.Combine(root, ".custom-hidden")) == "user file", "Unrelated file removed");
 
