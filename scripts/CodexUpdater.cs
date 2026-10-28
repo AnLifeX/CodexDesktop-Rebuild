@@ -31,6 +31,7 @@ internal static class CodexUpdater
                 return 0;
             }
 
+            if (!AllocConsole()) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not open the recovery console");
             Console.Title = "Codex Recovery Updater";
             string root = FindInstallRoot();
             if (root == null) return Fail("Codex is not installed for the current user.");
@@ -63,6 +64,7 @@ internal static class CodexUpdater
                 using (Process update = existingUpdate ?? Process.Start(new ProcessStartInfo(updateExe, "--update=\"" + feed + "\"")
                 {
                     UseShellExecute = false,
+                    CreateNoWindow = true,
                 }))
                 {
                 if (!AssignProcessToJobObject(job, update.Handle))
@@ -159,7 +161,7 @@ internal static class CodexUpdater
             finally { CloseHandle(job); }
             Console.WriteLine("Update completed.");
 
-            Process.Start(new ProcessStartInfo(updateExe, "--processStart ChatGPT.exe") { UseShellExecute = false });
+            Process.Start(new ProcessStartInfo(updateExe, "--processStart ChatGPT.exe") { UseShellExecute = false, CreateNoWindow = true });
             return 0;
         }
         catch (Exception error)
@@ -167,6 +169,9 @@ internal static class CodexUpdater
             return Fail(error.Message);
         }
     }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AllocConsole();
 
     private static string FindInstallRoot()
     {
