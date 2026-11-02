@@ -415,7 +415,7 @@ function buildRecoveryUpdater(appDirectory) {
   const output = path.join(appDirectory, "CodexUpdater.exe");
   run(compiler, [
     "/nologo",
-    "/target:exe",
+    "/target:winexe",
     `/win32icon:${path.join(PROJECT_ROOT, "resources", "electron.ico")}`,
     `/out:${output}`,
     path.join(PROJECT_ROOT, "scripts", "CodexUpdater.cs"),

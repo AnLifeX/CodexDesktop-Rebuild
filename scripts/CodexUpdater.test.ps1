@@ -112,4 +112,18 @@ try {
   Remove-Job $server -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $partial -ErrorAction SilentlyContinue
 }
-Write-Output 'CodexUpdater process scope, feed parsing, resumable download, and log reading passed'
+$guiExe = Join-Path ([IO.Path]::GetTempPath()) ('codex-updater-gui-test-' + [guid]::NewGuid().ToString('N') + '.exe')
+try {
+  $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  & $compiler /nologo /target:winexe "/out:$guiExe" (Join-Path $PSScriptRoot 'CodexUpdater.cs') (Join-Path $PSScriptRoot 'WindowsInstall.cs')
+  if ($LASTEXITCODE -ne 0) { throw 'GUI updater compilation failed' }
+  $pe = [IO.File]::ReadAllBytes($guiExe)
+  $peOffset = [BitConverter]::ToInt32($pe, 0x3c)
+  if ([BitConverter]::ToUInt16($pe, $peOffset + 24 + 68) -ne 2) { throw 'Maintenance executable still uses the console subsystem' }
+  # Missing arguments must exit before recovery can allocate a console or access the installation.
+  $child = Start-Process -FilePath $guiExe -ArgumentList '--maintenance-cleanup' -Wait -PassThru
+  try { if ($child.ExitCode -ne 1) { throw 'GUI maintenance did not reject missing arguments' } } finally { $child.Dispose() }
+} finally {
+  Remove-Item -LiteralPath $guiExe -ErrorAction SilentlyContinue
+}
+Write-Output 'CodexUpdater process scope, feed parsing, resumable download, log reading, and GUI maintenance entry passed'

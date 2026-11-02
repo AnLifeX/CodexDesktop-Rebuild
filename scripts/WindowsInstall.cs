@@ -202,8 +202,6 @@ public static class WindowsInstall
         }
         if (state.MigrationCommitted && !string.IsNullOrEmpty(state.LegacyRoot) && !Directory.Exists(state.LegacyRoot)) state.LegacyRoot = null;
         Save(root, state);
-        try { ScheduleCleanup(root, state); }
-        catch (Exception error) { File.AppendAllText(Path.Combine(root, "CodexInstall.log"), "Cleanup scheduling failed; will retry on launch: " + error.Message + Environment.NewLine); }
         Cleanup(root, DateTime.UtcNow.Ticks);
     }
 
@@ -364,6 +362,7 @@ public static class WindowsInstall
         Save(root, state);
         if (state.HealthyUtc > 0 && state.Versions.Count == 0 && string.IsNullOrEmpty(state.LegacyRoot))
             RunCommand(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "schtasks.exe"), new[] { "/Delete", "/TN", TaskName, "/F" }, false);
+        else ScheduleCleanup(root, state);
     }
 
     internal static void CleanupFiles(string root, State state, long now)
@@ -432,17 +431,25 @@ public static class WindowsInstall
         }
     }
 
-    internal static void ScheduleCleanup(string root, State state)
+    internal static DateTime? CleanupDue(State state, long now)
     {
+        if (state.HealthyUtc <= 0) return null;
         var deadlines = state.Versions.Where(item => item.ExpiresUtc > 0).Select(item => item.ExpiresUtc).ToList();
         if (!string.IsNullOrEmpty(state.LegacyRoot)) deadlines.Add(state.HealthyUtc + Retention.Ticks);
-        if (deadlines.Count == 0) return;
-        DateTime due = new DateTime(Math.Max(DateTime.UtcNow.AddMinutes(1).Ticks, deadlines.Min()), DateTimeKind.Utc);
+        if (deadlines.Count == 0) return null;
+        // Retry expired files in an hour; otherwise wake only at the next retention deadline.
+        return new DateTime(deadlines.Min(deadline => deadline <= now ? now + TimeSpan.FromHours(1).Ticks : deadline), DateTimeKind.Utc);
+    }
+
+    internal static void ScheduleCleanup(string root, State state)
+    {
+        DateTime? due = CleanupDue(state, DateTime.UtcNow.Ticks);
+        if (!due.HasValue) return;
         string sid = WindowsIdentity.GetCurrent().User.Value;
         var document = new XmlDocument();
-        document.LoadXml("<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"><Triggers><TimeTrigger><Repetition><Interval>PT1H</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary/><Enabled>true</Enabled></TimeTrigger><LogonTrigger><Enabled>true</Enabled><UserId/></LogonTrigger></Triggers><Principals><Principal id=\"Author\"><UserId/><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><Enabled>true</Enabled><Hidden>true</Hidden><ExecutionTimeLimit>PT15M</ExecutionTimeLimit></Settings><Actions Context=\"Author\"><Exec><Command/><Arguments/></Exec></Actions></Task>");
+        document.LoadXml("<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"><Triggers><TimeTrigger><StartBoundary/><Enabled>true</Enabled></TimeTrigger></Triggers><Principals><Principal id=\"Author\"><UserId/><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><Enabled>true</Enabled><Hidden>true</Hidden><ExecutionTimeLimit>PT15M</ExecutionTimeLimit></Settings><Actions Context=\"Author\"><Exec><Command/><Arguments/></Exec></Actions></Task>");
         var ns = new XmlNamespaceManager(document.NameTable); ns.AddNamespace("t", document.DocumentElement.NamespaceURI);
-        document.SelectSingleNode("//t:StartBoundary", ns).InnerText = due.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        document.SelectSingleNode("//t:StartBoundary", ns).InnerText = due.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ");
         foreach (XmlNode node in document.SelectNodes("//t:UserId", ns)) node.InnerText = sid;
         document.SelectSingleNode("//t:Command", ns).InnerText = Path.Combine(root, "CodexUpdater.exe");
         document.SelectSingleNode("//t:Arguments", ns).InnerText = "--maintenance-cleanup " + Quote(root);

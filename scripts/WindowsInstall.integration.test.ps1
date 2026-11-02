@@ -120,6 +120,11 @@ try {
       [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
       $task = Get-ScheduledTask -TaskName $taskName
       if ($task.Actions.Execute -ne (Join-Path $target 'CodexUpdater.exe')) { throw 'Cleanup task points to the wrong installation' }
+      if (@($task.Triggers).Count -ne 1 -or $task.Triggers[0].Repetition.Interval) { throw 'Cleanup must use a single deadline without hourly or logon triggers' }
+      [xml]$state = Get-Content -LiteralPath (Join-Path $target '.codex-install.xml')
+      $expiry = [datetime]::new([long]$state.State.Versions.Retired.ExpiresUtc, [DateTimeKind]::Utc)
+      $start = [datetime]::Parse($task.Triggers[0].StartBoundary).ToUniversalTime()
+      if ([Math]::Abs(($start - $expiry).TotalSeconds) -gt 1) { throw 'Cleanup task starts before its retention deadline' }
       $retired = Join-Path $target '.old\0\app-1.0.0'
       $heldExe = Join-Path $retired 'held.exe'
       Copy-Item -LiteralPath $fixtureExe -Destination $heldExe
@@ -128,9 +133,12 @@ try {
       $cleanup = Start-Process -FilePath $fixtureExe -ArgumentList @('--age', "`"$target`"") -WindowStyle Hidden -Wait -PassThru
       if ($cleanup.ExitCode -ne 0 -or (Test-Path -LiteralPath $root)) { throw 'Expired legacy root was not removed' }
       if (-not (Test-Path -LiteralPath $heldExe)) { throw 'Cleanup removed a running retired version' }
+      $retry = (Get-ScheduledTask -TaskName $taskName | Get-ScheduledTaskInfo).NextRunTime
+      if ($retry -lt (Get-Date).AddMinutes(59) -or $retry -gt (Get-Date).AddMinutes(61)) { throw 'Locked retired version did not schedule a one-hour retry' }
       $held.Kill(); $held.WaitForExit(); $held.Dispose(); $held = $null
       $cleanup = Start-Process -FilePath $fixtureExe -ArgumentList @('--age', "`"$target`"") -WindowStyle Hidden -Wait -PassThru
       if ($cleanup.ExitCode -ne 0 -or (Test-Path -LiteralPath $retired)) { throw 'Cleanup did not retry after the retired process exited' }
+      if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw 'Completed cleanup left its task registered' }
       if (-not (Test-Path -LiteralPath (Join-Path $target 'app-2.0.0\resources\app.asar'))) { throw 'Cleanup removed current resources' }
       # A backup restored after first healthy start still needs an expiration; a removed legacy root stays absent.
       New-Item -ItemType Directory -Path (Join-Path $target 'app-0.5.0') | Out-Null
