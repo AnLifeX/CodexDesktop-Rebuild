@@ -104,6 +104,7 @@ const {
   resolveRuntimeBootstrap,
   patchBootstrapCode,
   patchPreloadCode,
+  validateUpdaterPreloadSource,
   patchPackageMetadataSource,
   planLocalUpdaterSources,
   executeLocalUpdater,
@@ -1914,4 +1915,22 @@ test("surfaces every affected path when rollback is incomplete", (t) => {
       return true;
     },
   );
+});
+test("resolves a self-contained Webpack entry and patches an isolated preload", () => {
+  const entry = '(()=>{var r={};r.f.require=()=>{};r.u=()=>"chunk.js";var o={};module.exports=o})();';
+  const packageSource = JSON.stringify({ main: ".vite/build/early-bootstrap.js" });
+  assert.equal(resolveRuntimeBootstrap(packageSource, () => entry).runtimePath, ".vite/build/early-bootstrap.js");
+  const preload = '(()=>{"use strict";let o=require("electron");o.contextBridge.exposeInMainWorld("app",{});})();';
+  const result = patchPreloadCode(preload);
+  assert.equal(validateUpdaterPreloadSource(result.code).electronAlias, 'require("electron")');
+  assert.equal(patchPreloadCode(result.code).status, "already");
+  assert.throws(() => patchPreloadCode('(()=>{"use strict";const text=\'require("electron")\';})();'), /electron binding.*found 0/);
+});
+
+test("adds updater menu items when Webpack removed the empty help extension", () => {
+  const source = '(function(){let t=[{role:"help",submenu:[{label:"Docs"}]}];E.Menu.buildFromTemplate(t)})();';
+  const patched = patchMainMenuCode(source);
+  assert.match(patched, /codexRebuildMenu\.helpItems/);
+  assert.match(patched, /codexRebuildMenu\.topItems/);
+  assert.equal(patchMainMenuCode(patched), patched);
 });

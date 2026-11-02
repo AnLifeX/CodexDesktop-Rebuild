@@ -1641,7 +1641,7 @@ function patchPluginContracts({ mainSource, webviewSource }) {
 
 function classifyPluginTarget(fileName, source) {
   if (
-    /^main-.*\.js$/.test(fileName) &&
+    /^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName) &&
     source.includes("externalBrowserUseAllowed") &&
     source.includes("computerUse")
   ) {
@@ -1895,7 +1895,7 @@ function planPluginPlatform({ platform, candidates }) {
           const semanticCandidates = candidates.filter((candidate) => {
             const candidatePath = normalizePluginCandidate(candidate).path.replaceAll("\\", "/");
             if (candidatePath.includes("/.vite/build/") || candidatePath.startsWith(".vite/build/")) {
-              return /^main-.*\.js$/.test(candidate.fileName);
+              return /^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(candidate.fileName);
             }
             return (
               candidate.source.includes("authMethod") &&
@@ -1990,7 +1990,7 @@ function findWindowsPluginCandidates(platformName) {
     if (!fs.existsSync(root.path)) continue;
     for (const fileName of fs.readdirSync(root.path)) {
       if (!fileName.endsWith(".js")) continue;
-      if (root.kind === "main" && !/^main-.*\.js$/.test(fileName)) continue;
+      if (root.kind === "main" && !/^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName)) continue;
       const filePath = path.join(root.path, fileName);
       const source = fs.readFileSync(filePath, "utf-8");
       const isSemanticWebview =
@@ -2064,7 +2064,7 @@ function locateTargets(platform) {
     const buildDir = path.join(SRC_DIR, plat, "_asar", ".vite", "build");
     if (fs.existsSync(buildDir)) {
       for (const f of fs.readdirSync(buildDir)) {
-        if (!f.startsWith("main-") || !f.endsWith(".js")) continue;
+        if (!/^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(f)) continue;
         const fp = path.join(buildDir, f);
         const src = fs.readFileSync(fp, "utf-8");
         if (src.includes("externalBrowserUseAllowed") && src.includes("computerUse")) {

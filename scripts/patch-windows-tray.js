@@ -31,8 +31,8 @@ function patchWindowsTraySource(source) {
   }
   const electron = source.slice(target.callee.object.start, target.callee.object.end);
   if (target.arguments.length !== 2 || guid?.type !== "ConditionalExpression" ||
-      source.slice(guid.test.start, guid.test.end) !== `process.platform===\`win32\`&&${electron}.app.isPackaged` ||
-      guid.consequent.type !== "CallExpression" || guid.consequent.callee.type !== "Identifier" ||
+      ![ `process.platform===\`win32\`&&${electron}.app.isPackaged`, `"win32"===process.platform&&${electron}.app.isPackaged` ].includes(source.slice(guid.test.start, guid.test.end)) ||
+      guid.consequent.type !== "CallExpression" || !["Identifier", "FunctionExpression"].includes(guid.consequent.callee.type) ||
       source.slice(guid.alternate.start, guid.alternate.end) !== "void 0") {
     throw new Error("Windows tray GUID argument changed");
   }
@@ -50,7 +50,7 @@ function main() {
   if (args.some((arg) => ["unix", "mac-arm64", "mac-x64"].includes(arg))) return;
   const directory = path.join(SRC_DIR, "win", "_asar", ".vite", "build");
   if (!fs.existsSync(directory) && !args.includes("win")) return;
-  const bundles = fs.readdirSync(directory).filter((name) => /^main-.*\.js$/.test(name));
+  const bundles = fs.readdirSync(directory).filter((name) => /^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(name) && fs.readFileSync(path.join(directory, name), "utf8").includes(".Tray("));
   if (bundles.length !== 1) throw new Error("Windows tray main bundle is missing or ambiguous");
   const file = path.join(directory, bundles[0]);
   const result = patchWindowsTraySource(fs.readFileSync(file, "utf8"));

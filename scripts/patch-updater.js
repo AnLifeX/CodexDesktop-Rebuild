@@ -80,7 +80,11 @@ function patchUpdaterSource(source) {
     if (node.type !== "Property") return;
     const method = node.key?.name ?? node.key?.value;
     if (!targets.has(method)) return;
-    const body = node.value?.type === "FunctionExpression" ? node.value.body : null;
+    if (node.value?.type === "ArrowFunctionExpression" && node.value.body.type !== "BlockStatement") {
+      targets.get(method).push(node.value.body);
+      return;
+    }
+    const body = ["FunctionExpression", "ArrowFunctionExpression"].includes(node.value?.type) ? node.value.body : null;
     if (body?.type !== "BlockStatement" || body.body.length !== 1) return;
     const returned = body.body[0];
     if (returned.type !== "ReturnStatement" || !returned.argument) return;
@@ -155,7 +159,7 @@ function locateTargets(buildDir) {
       if (
         node.type === "Property" &&
         (node.key?.name ?? node.key?.value) === "shouldIncludeSparkle" &&
-        node.value?.type === "FunctionExpression"
+        ["FunctionExpression", "ArrowFunctionExpression"].includes(node.value?.type)
       ) found = true;
     });
     return found;

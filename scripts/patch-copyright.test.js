@@ -7,6 +7,13 @@ const {
   patchCopyrightSource,
 } = require("./patch-copyright");
 
+test("patches the Webpack escaped About copyright", () => {
+  const source = 'const html=`<div class="copyright">\\xa9 OpenAI</div>`;';
+  const result = patchCopyrightSource(source);
+  assert.ok(result.code.includes(NEW_COPYRIGHT_HTML));
+  assert.equal(patchCopyrightSource(result.code).status, "already");
+});
+
 test("patches the newer inline About-window copyright exactly once", () => {
   const source = `const html=\`<section>${OLD_COPYRIGHT_HTML}</section>\`;`;
   const first = patchCopyrightSource(source);
