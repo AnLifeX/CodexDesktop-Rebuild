@@ -9,6 +9,17 @@ const { patchUpdaterSource, patchUpdaterContracts, locateTargets } = require("./
 const UPDATER_FIXTURE =
   "let policy={shouldIncludeSparkle:function(e,t,n){return m(e,t,`darwin`,n)},shouldIncludeWindowsUpdater:function(e,t,n){return h(e,t,n)&&g(e)!=null},shouldIncludeWindowsMsixUpdater:function(e,t,n){return h(e,t,n)&&g(e)?.kind===`msix`},shouldIncludeUpdater:function(e,t,n){return policy.shouldIncludeSparkle(e,t,n)||policy.shouldIncludeWindowsUpdater(e,t,n)}}";
 
+test("locates and disables Webpack arrow policy definitions", (t) => {
+  const source = UPDATER_FIXTURE.replaceAll(/function\(e,t,n\)\{return ([^}]+)\}/g, "(e,t,n)=>$1");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-webpack-policy-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, "early-bootstrap.js"), source);
+  assert.deepEqual(locateTargets(dir), ["early-bootstrap.js"]);
+  const first = patchUpdaterSource(source);
+  assert.equal(first.counts.patchable, 4);
+  assert.equal(patchUpdaterSource(first.code).status, "already");
+});
+
 test("locates renamed policy bundles by definitions, ignoring callers and preserving ambiguous targets", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-updater-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

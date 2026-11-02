@@ -17,9 +17,10 @@ const PROJECT_ROOT = path.join(__dirname, "..");
  *   "assets" -> src/{plat}/webview/assets/
  * @param {RegExp} opts.pattern - Filename regex (e.g. /^index-.*\.js$/)
  * @param {string} [opts.platform] - Restrict to a single platform
+ * @param {string} [opts.contains] - Required source text for split bundle discovery
  * @returns {Array<{platform: string, path: string}>}
  */
-function locateBundles({ dir, pattern, platform }) {
+function locateBundles({ dir, pattern, platform, contains }) {
   const dirMap = {
     build: (plat) => path.join(SRC_DIR, plat, "_asar", ".vite", "build"),
     assets: (plat) => path.join(SRC_DIR, plat, "_asar", "webview", "assets"),
@@ -59,7 +60,8 @@ function locateBundles({ dir, pattern, platform }) {
     const d = getDir(plat);
     if (!fs.existsSync(d)) continue;
 
-    const files = fs.readdirSync(d).filter((f) => pattern.test(f));
+    const files = fs.readdirSync(d).filter((f) => pattern.test(f) &&
+      (!contains || fs.readFileSync(path.join(d, f), "utf8").includes(contains)));
     if (files.length === 0) {
       console.warn(`  [!] ${plat}: no match for ${pattern}`);
       continue;

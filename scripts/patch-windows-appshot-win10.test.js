@@ -13,6 +13,25 @@ const FUNCTION_ANCHOR = "function qit({decorateApp:e=async()=>null,loadHelperTra
 // Capture body from 26.1013: the decoration and update callback swapped names.
 const CAPTURE_1013 = "try{let t=await W7(d(),o),n=m2e(e,f.window,f.decoration,i,s),a=await v(t,f,n,o);if(a==null)return null;let{transitionId:l,...p}=a,m={emitUpdate:r,signal:o==null?c.signal:AbortSignal.any([o,c.signal]),transitionId:l,transport:t,window:f.window},h=g(m);return u.add(h),h.finally(()=>u.delete(h)),{result:`started`,...p}}catch(e){return o?.aborted||z7().warning(`Windows Appshot start failed`,{safe:{requestId:a},sensitive:{error:e}}),null}";
 
+test("Webpack Appshot closes per-capture helpers on completion, empty result and failure", async () => {
+  const source = 'const bridge=function({decorateApp:e=async()=>null,loadHelperTransport:t}){function acquire(){return t(controller.signal)}return {async startCapture(){try{let t=await wait(acquire(),signal),s=await start(t);if(null==s)return null;let y=done();return active.add(y),y.finally(()=>active.delete(y)),{result:"started"}}catch(e){return logger.warning("Windows Appshot start failed"),null}}}};';
+  const patched = patchMainSource(source);
+  assert.equal(patchMainSource(patched), patched);
+  for (const build of [19045, 22631]) for (const outcome of ["started", "null", "error"]) {
+    let closed = 0;
+    const context = vm.createContext({
+      process: { getSystemVersion: () => `10.0.${build}` }, signal: undefined, controller: {signal: undefined},
+      wait: async value => value,
+      start: async () => { if (outcome === "error") throw Error("capture failed"); return outcome === "null" ? null : {}; },
+      done: () => Promise.resolve(), active: new Set(), logger: { warning() {} },
+      loader: async () => ({ close: async () => { closed++; } }),
+    });
+    await vm.runInContext(patched + 'bridge({loadHelperTransport:loader}).startCapture()', context);
+    await Promise.resolve();
+    assert.equal(closed, build < 20348 ? 1 : 0, `${build}: ${outcome}`);
+  }
+});
+
 test("uses a one-shot helper for Appshot on legacy Windows and closes it", () => {
   const source = `${FUNCTION_ANCHOR}let e=c,n=t(e.signal).thenxxx${ORIGINAL_CAPTURE}`;
   const patched = patchMainSource(source);

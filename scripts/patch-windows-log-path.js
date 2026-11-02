@@ -12,7 +12,7 @@ function windowsLogDirectory(local) {
 
 function patchSource(source) {
   if (source.includes("function windowsLogDirectory(")) return source;
-  const pattern = /return\(0,[\w$]+\.join\)\(([\w$]+),`Codex`,`Logs`\)/g;
+  const pattern = /return\(0,[\w$]+\.join\)\(([\w$]+),([`"'])Codex\2,([`"'])Logs\3\)/g;
   if ([...source.matchAll(pattern)].length !== 1) throw new Error("Expected one Windows log directory expression");
   return source.replace(pattern, (_match, local) => `return(${windowsLogDirectory.toString()})(${local})`);
 }
@@ -22,7 +22,7 @@ function main() {
   if (platform && platform !== "win") return;
   const build = path.join(SRC_DIR, "win", "_asar", ".vite", "build");
   if (!fs.existsSync(build)) return;
-  const files = fs.readdirSync(build).filter(name => /^(?:file-based-logger.*|worker)\.js$/.test(name));
+  const files = fs.readdirSync(build).filter(name => /^(?:file-based-logger.*|early-bootstrap|worker)\.js$/.test(name));
   if (files.length !== 2) throw new Error("Expected Windows main and worker loggers");
   const changes = files.map(name => {
     const file = path.join(build, name), source = fs.readFileSync(file, "utf8");

@@ -22,6 +22,7 @@ test("logger patch is idempotent and rejects unknown or duplicate targets", () =
   assert.ok(next.includes("windowsLogDirectory"));
   assert.equal(patchSource(next), next);
   assert.ok(patchSource(source.replaceAll("a.join", "g.join")).includes("windowsLogDirectory"));
+  assert.ok(patchSource(source.replaceAll("`", '"')).includes("windowsLogDirectory"));
   assert.throws(() => patchSource("unknown"), /Expected one/);
   assert.throws(() => patchSource(source + source), /Expected one/);
 });
