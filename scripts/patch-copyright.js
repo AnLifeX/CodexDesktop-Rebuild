@@ -90,15 +90,17 @@ function collectPatches(ast, source) {
   // Newer desktop builds render the About window from an inline HTML template
   // instead of setAboutPanelOptions({ copyright: ... }). Keep this target exact
   // so unrelated OpenAI strings are never rewritten.
-  let htmlOffset = source.indexOf(OLD_COPYRIGHT_HTML);
+  for (const html of [OLD_COPYRIGHT_HTML, OLD_COPYRIGHT_HTML.replace("©", "\\xa9")]) {
+  let htmlOffset = source.indexOf(html);
   while (htmlOffset !== -1) {
     patches.push({
       start: htmlOffset,
-      end: htmlOffset + OLD_COPYRIGHT_HTML.length,
+      end: htmlOffset + html.length,
       replacement: NEW_COPYRIGHT_HTML,
       original: OLD_COPYRIGHT_HTML,
     });
-    htmlOffset = source.indexOf(OLD_COPYRIGHT_HTML, htmlOffset + OLD_COPYRIGHT_HTML.length);
+    htmlOffset = source.indexOf(html, htmlOffset + html.length);
+  }
   }
   return patches;
 }
@@ -158,7 +160,8 @@ function main() {
 
   const bundles = locateBundles({
     dir: "build",
-    pattern: /^main(-[^.]+)?\.js$/,
+    pattern: /^(?:main(?:-[^.]+)?|early-bootstrap-\d+-[\da-f]+)\.js$/,
+    contains: "copyright",
     platform,
   });
 

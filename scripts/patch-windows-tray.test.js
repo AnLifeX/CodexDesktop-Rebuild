@@ -5,6 +5,13 @@ const { patchWindowsTraySource } = require("./patch-windows-tray");
 
 const SOURCE = "new electron.Tray(icons.defaultIcon,process.platform===`win32`&&electron.app.isPackaged?getGuid(flavor):void 0)";
 
+test("supports the Webpack inline GUID selector", () => {
+  const source = 'new electron.Tray(icons.defaultIcon,"win32"===process.platform&&electron.app.isPackaged?function(e){return "guid"}(flavor):void 0)';
+  const result = patchWindowsTraySource(source);
+  assert.equal(result.status, "patched");
+  assert.equal(patchWindowsTraySource(result.code).status, "already");
+});
+
 test("unsigned Windows tray creation never supplies a path-bound GUID", () => {
   const patched = patchWindowsTraySource(SOURCE);
   assert.equal(patched.status, "patched");

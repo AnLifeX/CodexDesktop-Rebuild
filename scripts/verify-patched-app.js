@@ -827,7 +827,7 @@ function inspectPluginContract(sources) {
     ).filter(({ fileName, filePath, source }) => {
       if (filePath.includes("/.vite/build/")) {
         return (
-          /^main-.*\.js$/.test(fileName) &&
+          /^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName) &&
           source.includes("externalBrowserUseAllowed") &&
           source.includes("computerUse")
         );
@@ -912,7 +912,7 @@ const CONTRACT_DEFINITIONS = [
     id: "windows-tray",
     inspect(sources) {
       const candidates = sources.filter(({ file, source }) =>
-        /\/main-[^/]+\.js$/.test(file) && /\.Tray\s*\(/.test(source));
+        /\/(?:main-[^/]+|early-bootstrap-\d+-[\da-f]+)\.js$/.test(file) && /\.Tray\s*\(/.test(source));
       if (candidates.length !== 1) return { detail: `expected 1 tray bundle, found ${candidates.length}` };
       try {
         if (patchWindowsTraySource(candidates[0].source).status !== "already") {
@@ -976,7 +976,7 @@ function listBundleFiles(directory) {
 function isVerificationSource(asarRoot, filePath) {
   const relative = toPosix(path.relative(asarRoot, filePath));
   if (relative === "package.json") return true;
-  if (/^\.vite\/build\/(?:early-bootstrap|preload|bootstrap(?:-[A-Za-z0-9_$-]+)?|main-.*)\.js$/.test(relative)) {
+  if (/^\.vite\/build\/(?:early-bootstrap(?:-\d+-[\da-f]+)?|preload|bootstrap(?:-[A-Za-z0-9_$-]+)?|main-.*)\.js$/.test(relative)) {
     return true;
   }
   return /^webview\/assets\/(?:app-initial|app-primary|app-shared|app-shell|data-controls|use-service-tier-settings|read-service-tier-for-request|use-is-plugins-enabled)-.*\.js$/.test(

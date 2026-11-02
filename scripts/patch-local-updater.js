@@ -1168,9 +1168,12 @@ function literalValue(node) {
 
 function analyzeMainMenuCode(code) {
   const ast = acorn.parse(code, { ecmaVersion: "latest", sourceType: "script" });
-  const declarations = new Map();
+  const scopes = new Map();
   const buildCalls = [];
-  walkAst(ast, (node) => {
+  walkAstWithAncestors(ast, (node, ancestors) => {
+    const scope = nearestLexicalScope(ancestors);
+    if (!scopes.has(scope)) scopes.set(scope, new Map());
+    const declarations = scopes.get(scope);
     if (node.type === "VariableDeclarator" && node.id.type === "Identifier") {
       declarations.set(node.id.name, node);
     }
@@ -1188,12 +1191,13 @@ function analyzeMainMenuCode(code) {
       node.arguments.length === 1 &&
       node.arguments[0].type === "Identifier"
     ) {
-      buildCalls.push(node);
+      buildCalls.push({ node, scope });
     }
   });
 
   const shapes = [];
-  for (const buildCall of buildCalls) {
+  for (const { node: buildCall, scope } of buildCalls) {
+    const declarations = scopes.get(scope);
     const template = declarations.get(buildCall.arguments[0].name);
     if (!template || template.init?.type !== "ArrayExpression") continue;
     const helpObjects = template.init.elements.filter((element) => {
@@ -1212,6 +1216,14 @@ function analyzeMainMenuCode(code) {
         const declaration = declarations.get(element.argument.name);
         return declaration?.init?.type === "ArrayExpression" && declaration.init.elements.length === 0;
       });
+      if (extensionSpreads.length === 0) {
+        if (declarations.has("codexRebuildMenu")) continue;
+        shapes.push({ electronAlias: buildCall.callee.object.object.name,
+          extensionName: "codexRebuildMenu", templateArray: template.init,
+          extensionInit: { start: template.start, end: template.start },
+          extensionSpread: { start: submenu.end - 1, end: submenu.end - 1 }, insert: true });
+        continue;
+      }
       if (extensionSpreads.length !== 1) continue;
       const extensionSpread = extensionSpreads[0];
       shapes.push({
@@ -1446,11 +1458,12 @@ function patchMainMenuCode(code) {
   const shape = analyzeMainMenuCode(code);
   const patch = makeMainMenuPatch(shape.electronAlias);
   const next = applyReplacements(code, [
-    { start: shape.extensionInit.start, end: shape.extensionInit.end, text: patch },
+    { start: shape.extensionInit.start, end: shape.extensionInit.end,
+      text: shape.insert ? `${shape.extensionName}=${patch},` : patch },
     {
       start: shape.extensionSpread.start,
       end: shape.extensionSpread.end,
-      text: `...${shape.extensionName}.helpItems`,
+      text: `${shape.insert ? "," : ""}...${shape.extensionName}.helpItems`,
     },
     {
       start: shape.templateArray.end - 1,
@@ -2496,12 +2509,15 @@ function resolveRuntimeBootstrap(packageSource, readSource) {
   let runtimePath = entryPath;
   let viaEarlyBootstrap = false;
   if (entryName === "early-bootstrap.js") {
-    viaEarlyBootstrap = true;
     const entrySource = readSource(entryPath);
     if (typeof entrySource !== "string") {
       throw new Error(`Windows early bootstrap is missing: ${entryPath}`);
     }
-    const targets = liveRuntimeBootstrapTargets(entrySource);
+    // Webpack embeds the runtime in the entry itself instead of requiring a bootstrap chunk.
+    const webpackEntry = entrySource.includes(".f.require=") && entrySource.includes(".u=") &&
+      /module\.exports=[\w$]+\}\)\(\);/.test(entrySource);
+    viaEarlyBootstrap = !webpackEntry;
+    const targets = webpackEntry ? ["./early-bootstrap.js"] : liveRuntimeBootstrapTargets(entrySource);
     if (targets.length !== 1) {
       throw new Error(`runtime bootstrap expected exactly 1 target, found ${targets.length}`);
     }
@@ -2509,7 +2525,7 @@ function resolveRuntimeBootstrap(packageSource, readSource) {
   } else if (!/^bootstrap(?:-[A-Za-z0-9_$-]+)?\.js$/.test(entryName)) {
     throw new Error(`unsupported Windows runtime bootstrap entry: ${entryPath}`);
   }
-  if (runtimePath === entryPath && entryName === "early-bootstrap.js") {
+  if (runtimePath === entryPath && entryName === "early-bootstrap.js" && viaEarlyBootstrap) {
     throw new Error("early-bootstrap.js cannot satisfy the runtime backend contract");
   }
   if (typeof readSource(runtimePath) !== "string") {
@@ -2739,6 +2755,8 @@ function findElectronBinding(code) {
     }
   }
   if (bindings.length !== 1) {
+    if (bindings.length === 0 && /^\(\(\)=>\{["']use strict["'];/.test(code) &&
+        code.includes('require("electron")')) return 'require("electron")';
     throw new Error(
       `program-scope preload electron binding expected exactly 1 target, found ${bindings.length}`,
     );
@@ -3006,7 +3024,7 @@ function validateLocalUpdaterSources({ packageSource, files, expectedUpdateUrl }
 
   const backendEvidence = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^\.vite\/build\/bootstrap(?:-[A-Za-z0-9_$-]+)?\.js$/.test(fileName)) continue;
+    if (!/^\.vite\/build\/(?:early-bootstrap|bootstrap(?:-[A-Za-z0-9_$-]+)?)\.js$/.test(fileName)) continue;
     if (fileName !== resolved.runtimePath && !hasBackendSignature(String(source || ""))) continue;
     let inspection;
     try {
@@ -3035,7 +3053,7 @@ function validateLocalUpdaterSources({ packageSource, files, expectedUpdateUrl }
 
   const mainMenuEvidence = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^\.vite\/build\/main-.*\.js$/.test(fileName)) continue;
+    if (!/^\.vite\/build\/(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName)) continue;
     if (!hasMainMenuSignature(String(source || ""))) continue;
     let inspection;
     try {
@@ -3091,7 +3109,7 @@ function validateLocalUpdaterSources({ packageSource, files, expectedUpdateUrl }
 function selectMainMenuTarget(normalizedFiles) {
   const candidates = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^\.vite\/build\/main-.*\.js$/.test(fileName)) continue;
+    if (!/^\.vite\/build\/(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName)) continue;
     if (hasMainMenuSignature(String(source || ""))) {
       try {
         candidates.push({ path: fileName, code: patchMainMenuCode(source) });
@@ -3251,7 +3269,7 @@ function collectLocalUpdaterSources(asarRoot) {
       fileName === "early-bootstrap.js" ||
       fileName === "preload.js" ||
       /^bootstrap(?:-[A-Za-z0-9_$-]+)?\.js$/.test(fileName) ||
-      /^main-.*\.js$/.test(fileName)
+      /^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName)
     ) {
       files[`.vite/build/${fileName}`] = fs.readFileSync(path.join(buildDir, fileName), "utf-8");
     }

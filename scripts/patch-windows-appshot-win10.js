@@ -10,6 +10,7 @@
  * shared helper path.
  */
 const fs = require("node:fs");
+const { parse } = require("acorn");
 const { locateBundles, relPath } = require("./patch-util");
 
 const FUNCTION_ANCHOR =
@@ -28,6 +29,7 @@ function latestCapture(source) {
 }
 
 function patchMainSource(source) {
+  if (source.includes("function({decorateApp:")) return patchWebpackSource(source);
   if (source.includes("closeCaptureTransport=Number(process.getSystemVersion")) {
     return source.replace(SHARED_TRANSPORT_LOAD, "let e=c,$1=loadHelperTransport(e.signal).then");
   }
@@ -64,6 +66,67 @@ function patchMainSource(source) {
     .replace(originalCapture, patchedCapture);
 }
 
+function patchWebpackSource(source) {
+  if (source.includes("/* CodexRebuildAppshotWebpack */")) return source;
+  const ast = parse(source, { ecmaVersion: "latest", sourceType: "script" });
+  const find = (root, predicate) => {
+    const matches = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (node.type && predicate(node)) matches.push(node);
+      for (const value of Object.values(node)) {
+        if (Array.isArray(value)) value.forEach(visit);
+        else if (value && typeof value === "object") visit(value);
+      }
+    }
+    visit(root);
+    return matches;
+  };
+  const one = (nodes, label) => {
+    if (nodes.length !== 1) throw new Error(`Windows Appshot ${label} expected 1 target, found ${nodes.length}`);
+    return nodes[0];
+  };
+  const text = node => source.slice(node.start, node.end);
+  const bridge = one(find(ast, node => node.type === "FunctionExpression" &&
+    text(node).startsWith("function({decorateApp:") && text(node).includes("Windows Appshot start failed")), "bridge");
+  const helper = one(bridge.params[0].properties.filter(node => node.key.name === "loadHelperTransport"), "helper");
+  const acquisition = one(find(bridge.body, node => node.type === "CallExpression" &&
+    node.callee.type === "Identifier" && node.callee.name === helper.value.name &&
+    node.arguments.length === 1 && node.arguments[0].type === "MemberExpression" &&
+    node.arguments[0].property.name === "signal"), "shared acquisition");
+  const capture = one(find(bridge.body, node => node.type === "Property" && node.key.name === "startCapture"), "capture").value;
+  const attempt = one(find(capture.body, node => node.type === "TryStatement" &&
+    text(node.handler).includes("Windows Appshot start failed")), "capture try");
+  const transport = attempt.block.body[0].declarations?.[0]?.init;
+  if (transport?.type !== "AwaitExpression" || transport.argument.type !== "CallExpression" ||
+      transport.argument.arguments.length !== 2) throw new Error("Windows Appshot transport changed");
+  const [shared, signal] = transport.argument.arguments;
+  if (shared.type !== "CallExpression" || shared.arguments.length !== 0) throw new Error("Windows Appshot shared getter changed");
+  const completion = one(find(attempt.block, node => node.type === "CallExpression" &&
+    node.callee.type === "MemberExpression" && node.callee.property.name === "finally"), "completion");
+  const callback = completion.arguments[0];
+  if (callback?.type !== "ArrowFunctionExpression" || callback.body.type !== "CallExpression") {
+    throw new Error("Windows Appshot completion changed");
+  }
+  const empty = one(find(attempt.block, node => node.type === "ReturnStatement" &&
+    node.argument?.type === "Literal" && node.argument.value === null), "empty result");
+  const cleanup = "if(closeCaptureTransport&&captureTransport)await captureTransport.close().catch(()=>void 0);";
+  const changes = [
+    { start: helper.value.start, end: helper.value.end, code: "loadHelperTransport" },
+    { start: acquisition.callee.start, end: acquisition.callee.end, code: "loadHelperTransport" },
+    { start: attempt.start, end: attempt.start, code: "/* CodexRebuildAppshotWebpack */let closeCaptureTransport=Number(process.getSystemVersion().split(`.`)[2])<20348,captureTransport;" },
+    { start: transport.start, end: transport.end, code: `captureTransport=await ${text(transport.argument.callee)}(closeCaptureTransport?loadHelperTransport(${text(signal)}):${text(shared)},${text(signal)})` },
+    { start: empty.start, end: empty.end, code: `{${cleanup}return null}` },
+    { start: callback.start, end: callback.end, code: `async()=>{try{return ${text(callback.body)}}finally{${cleanup}}}` },
+    { start: attempt.handler.body.start + 1, end: attempt.handler.body.start + 1, code: cleanup },
+  ];
+  for (const change of changes.sort((a,b) => b.start-a.start)) {
+    source = source.slice(0, change.start) + change.code + source.slice(change.end);
+  }
+  parse(source, { ecmaVersion: "latest", sourceType: "script" });
+  return source;
+}
+
 function main() {
   const args = process.argv.slice(2);
   const platform = args.find((arg) =>
@@ -72,7 +135,8 @@ function main() {
   if (platform && platform !== "win") return;
   const bundles = locateBundles({
     dir: "build",
-    pattern: /^main-.*\.js$/,
+    pattern: /^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/,
+    contains: "Windows Appshot start failed",
     platform: platform === "win" ? "win" : undefined,
   });
   if (bundles.length === 0) {
