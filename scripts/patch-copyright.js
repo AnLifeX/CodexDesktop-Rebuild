@@ -91,16 +91,16 @@ function collectPatches(ast, source) {
   // instead of setAboutPanelOptions({ copyright: ... }). Keep this target exact
   // so unrelated OpenAI strings are never rewritten.
   for (const html of [OLD_COPYRIGHT_HTML, OLD_COPYRIGHT_HTML.replace("©", "\\xa9")]) {
-  let htmlOffset = source.indexOf(html);
-  while (htmlOffset !== -1) {
-    patches.push({
-      start: htmlOffset,
-      end: htmlOffset + html.length,
-      replacement: NEW_COPYRIGHT_HTML,
-      original: OLD_COPYRIGHT_HTML,
-    });
-    htmlOffset = source.indexOf(html, htmlOffset + html.length);
-  }
+    let htmlOffset = source.indexOf(html);
+    while (htmlOffset !== -1) {
+      patches.push({
+        start: htmlOffset,
+        end: htmlOffset + html.length,
+        replacement: NEW_COPYRIGHT_HTML,
+        original: html,
+      });
+      htmlOffset = source.indexOf(html, htmlOffset + html.length);
+    }
   }
   return patches;
 }

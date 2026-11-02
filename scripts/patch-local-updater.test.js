@@ -1924,6 +1924,7 @@ test("resolves a self-contained Webpack entry and patches an isolated preload", 
   const result = patchPreloadCode(preload);
   assert.equal(validateUpdaterPreloadSource(result.code).electronAlias, 'require("electron")');
   assert.equal(patchPreloadCode(result.code).status, "already");
+  assert.throws(() => patchPreloadCode('(()=>{"use strict";const text=\'require("electron")\';})();'), /electron binding.*found 0/);
 });
 
 test("adds updater menu items when Webpack removed the empty help extension", () => {

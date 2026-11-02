@@ -17,6 +17,7 @@ const PROJECT_ROOT = path.join(__dirname, "..");
  *   "assets" -> src/{plat}/webview/assets/
  * @param {RegExp} opts.pattern - Filename regex (e.g. /^index-.*\.js$/)
  * @param {string} [opts.platform] - Restrict to a single platform
+ * @param {string} [opts.contains] - Required source text for split bundle discovery
  * @returns {Array<{platform: string, path: string}>}
  */
 function locateBundles({ dir, pattern, platform, contains }) {

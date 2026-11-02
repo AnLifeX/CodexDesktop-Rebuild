@@ -2739,7 +2739,12 @@ function findElectronBinding(code) {
     throw new Error(`Windows preload parse failed: ${error.message}`);
   }
   const bindings = [];
-  for (const statement of ast.body) {
+  const entry = ast.body.length === 1 && ast.body[0].type === "ExpressionStatement"
+    ? ast.body[0].expression : null;
+  const webpackPreload = entry?.type === "CallExpression" && entry.arguments.length === 0 &&
+    entry.callee.type === "ArrowFunctionExpression" && entry.callee.params.length === 0 &&
+    entry.callee.body.type === "BlockStatement" && entry.callee.body.body[0]?.directive === "use strict";
+  for (const statement of webpackPreload ? entry.callee.body.body : ast.body) {
     if (statement.type !== "VariableDeclaration") continue;
     for (const declaration of statement.declarations) {
       if (
@@ -2755,13 +2760,11 @@ function findElectronBinding(code) {
     }
   }
   if (bindings.length !== 1) {
-    if (bindings.length === 0 && /^\(\(\)=>\{["']use strict["'];/.test(code) &&
-        code.includes('require("electron")')) return 'require("electron")';
     throw new Error(
       `program-scope preload electron binding expected exactly 1 target, found ${bindings.length}`,
     );
   }
-  return bindings[0];
+  return webpackPreload ? 'require("electron")' : bindings[0];
 }
 
 function hasPreloadSignature(code) {
