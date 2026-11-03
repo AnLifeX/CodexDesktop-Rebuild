@@ -8,6 +8,7 @@ const test = require("node:test");
 
 const { verifyPatchedApp } = require("./verify-patched-app");
 const { patchWindowsTraySource } = require("./patch-windows-tray");
+const { ANCHOR: LOCAL_ARCHIVE_ANCHOR, patchLocalArchiveSource } = require("./patch-local-archive");
 const {
   makeMainMenuPatch,
   makePreloadPatch,
@@ -29,6 +30,7 @@ const UPDATER_BACKEND_FIXTURE = [
   "/* CodexRebuildLocalUpdater:file-end */",
 ].join("\n");
 const CONTRACT_IDS = [
+  "local-archive",
   "windows-tray",
   "fast",
   "plugin",
@@ -353,6 +355,9 @@ function createFixture(t, options = {}) {
   installStructuralFeatureFixtures(fixture);
   writeText(path.join(asarRoot, ".vite", "build", "main-tray.js"),
     patchWindowsTraySource("new e.Tray(icons.defaultIcon,process.platform===`win32`&&e.app.isPackaged?guid(flavor):void 0)").code);
+  writeText(path.join(asarRoot, ".vite", "build", "main-local-archive.js"), patchLocalArchiveSource(
+    `class Archive{#owner;async owner(){let e=this.connection,t=e.getCachedAuthenticatedPrincipal();if(t)return t;let n=await e.getAuthenticatedPrincipal();if(n)return n;let{account:r,requiresOpenaiAuth:i}=await e.getAccount();return this.#owner=r?.type==="apiKey"||!1===i?"apikey":null}};const error=${JSON.stringify(LOCAL_ARCHIVE_ANCHOR)};`
+  ).code);
 
   return fixture;
 }
@@ -362,6 +367,12 @@ test("rejects a tray bundle that still binds the official GUID to the EXE path",
   writeText(path.join(fixture.asarRoot, ".vite", "build", "main-tray.js"),
     "new e.Tray(icons.defaultIcon,process.platform===`win32`&&e.app.isPackaged?guid(flavor):void 0)");
   assert.throws(() => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION), /windows-tray/);
+});
+
+test("rejects a missing local archive compatibility patch", (t) => {
+  const fixture = createFixture(t);
+  fs.unlinkSync(path.join(fixture.asarRoot, ".vite", "build", "main-local-archive.js"));
+  assert.throws(() => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION), /local-archive/);
 });
 
 function addMarker(fixture, marker) {
@@ -1157,6 +1168,7 @@ test("combines package mismatch with every unsatisfied contract", (t) => {
     omitMarkers: MARKERS.map((marker) => marker.id),
   });
   writeText(path.join(fixture.asarRoot, ".vite", "build", "main-tray.js"), "const missingTray = true;");
+  fs.unlinkSync(path.join(fixture.asarRoot, ".vite", "build", "main-local-archive.js"));
 
   assert.throws(
     () => verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION),
