@@ -35,6 +35,7 @@ const PATCHES = [
   "patch-archive-delete.js",
   "patch-sidebar-delete.js",
   "patch-show-all-local-sessions.js",
+  "patch-local-archive.js",
 ];
 
 const NODE_FLAGS_BY_PATCH = new Map([

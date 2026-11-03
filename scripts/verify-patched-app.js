@@ -9,6 +9,7 @@ const {
 const { planArchivePlatform } = require("./patch-archive-delete");
 const { validateLocalUpdaterSources } = require("./patch-local-updater");
 const { patchWindowsTraySource } = require("./patch-windows-tray");
+const { ANCHOR: LOCAL_ARCHIVE_ANCHOR, patchLocalArchiveSource } = require("./patch-local-archive");
 
 const PROJECT_ROOT = path.join(__dirname, "..");
 const TEXT_BUNDLE_EXTENSIONS = new Set([
@@ -908,6 +909,22 @@ function inspectLocalUpdaterContract(sources) {
 }
 
 const CONTRACT_DEFINITIONS = [
+  {
+    id: "local-archive",
+    inspect(sources) {
+      const candidates = sources.filter(({ file, source }) =>
+        file.includes("/.vite/build/") && source.includes(LOCAL_ARCHIVE_ANCHOR));
+      if (candidates.length !== 1) return { detail: `expected 1 local archive manager, found ${candidates.length}` };
+      try {
+        if (patchLocalArchiveSource(candidates[0].source).status !== "already") {
+          return { detail: "local archive still requires an official ChatGPT identity" };
+        }
+        return { files: [candidates[0].file] };
+      } catch (error) {
+        return inspectionFailure(error);
+      }
+    },
+  },
   {
     id: "windows-tray",
     inspect(sources) {
