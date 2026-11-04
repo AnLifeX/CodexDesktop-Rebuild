@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * Post-build patch: Remove plugin auth gate + force browser-use available
  *
@@ -1988,7 +1989,7 @@ function findWindowsPluginCandidates(platformName) {
   const candidates = [];
   for (const root of roots) {
     if (!fs.existsSync(root.path)) continue;
-    for (const fileName of fs.readdirSync(root.path)) {
+    for (const fileName of listJavaScriptFiles(root.path)) {
       if (!fileName.endsWith(".js")) continue;
       if (root.kind === "main" && !/^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName)) continue;
       const filePath = path.join(root.path, fileName);
@@ -2022,7 +2023,7 @@ function locateTargets(platform) {
     const assetsDir = path.join(SRC_DIR, plat, "_asar", "webview", "assets");
     if (!fs.existsSync(assetsDir)) continue;
 
-    for (const f of fs.readdirSync(assetsDir)) {
+    for (const f of listJavaScriptFiles(assetsDir)) {
       if (!f.endsWith(".js")) continue;
       const fp = path.join(assetsDir, f);
       const src = fs.readFileSync(fp, "utf-8");
@@ -2105,7 +2106,7 @@ function main() {
     const candidates = [];
     for (const root of roots) {
       if (!fs.existsSync(root)) continue;
-      for (const fileName of fs.readdirSync(root)) {
+      for (const fileName of listJavaScriptFiles(root)) {
         if (!fileName.endsWith(".js")) continue;
         const filePath = path.join(root, fileName);
         const source = fs.readFileSync(filePath, "utf-8");

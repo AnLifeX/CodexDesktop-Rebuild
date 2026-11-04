@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * Keep local history visible across auth/provider changes.
  *
@@ -78,7 +79,7 @@ function locatePlatformCandidates(platform) {
   const assetsDir = path.join(SRC_DIR, platform, "_asar", "webview", "assets");
   if (!fs.existsSync(assetsDir)) return [];
   const candidates = [];
-  for (const fileName of fs.readdirSync(assetsDir)) {
+  for (const fileName of listJavaScriptFiles(assetsDir)) {
     if (!fileName.endsWith(".js")) continue;
     const filePath = path.join(assetsDir, fileName);
     const source = fs.readFileSync(filePath, "utf8");

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * Post-build patch: expose service tiers according to the selected model.
  * Local auth and remote account requirements do not gate the selector or
@@ -892,7 +893,7 @@ function main() {
   for (const plat of platforms) {
     const assetsDir = path.join(SRC_DIR, plat, "_asar", "webview", "assets");
     if (!fs.existsSync(assetsDir)) continue;
-    for (const f of fs.readdirSync(assetsDir)) {
+    for (const f of listJavaScriptFiles(assetsDir)) {
       const isJavaScript = f.endsWith(".js");
       if (!isJavaScript) continue;
       const fp = path.join(assetsDir, f);
