@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * patch-archive-delete.js — Add "Delete" button to archived conversations list.
  *
@@ -1602,7 +1603,7 @@ function patchArchiveContracts({ appMainSource, dataControlsSource }) {
 function findExactAsset(platform, pattern, label) {
   const directory = path.join(SRC_DIR, platform, "_asar", "webview", "assets");
   if (!fs.existsSync(directory)) throw new Error(`${label} asset directory is missing for ${platform}`);
-  const matches = fs.readdirSync(directory).filter((fileName) => pattern.test(fileName));
+  const matches = listJavaScriptFiles(directory).filter((fileName) => pattern.test(fileName));
   if (matches.length !== 1) {
     throw new Error(`${label} expected exactly 1 bundle for ${platform}, found ${matches.length}`);
   }
@@ -1932,7 +1933,7 @@ function formatArchiveSummary(outcomes) {
 function findWindowsArchiveTargets(directory) {
   const appMainTargets = [];
   const dataControlsTargets = [];
-  for (const fileName of fs.readdirSync(directory)) {
+  for (const fileName of listJavaScriptFiles(directory)) {
     if (!fileName.endsWith(".js")) continue;
     const isDataControlsName = /^data-controls-.*\.js$/.test(fileName);
     const filePath = path.join(directory, fileName);
@@ -1975,7 +1976,7 @@ function main() {
       }
       return {
         platform: platformName,
-        candidates: fs.readdirSync(directory)
+        candidates: listJavaScriptFiles(directory)
           .filter((fileName) => fileName.endsWith(".js"))
           .map((fileName) => {
             const filePath = path.join(directory, fileName);
@@ -1989,7 +1990,7 @@ function main() {
     }
     return {
       platform: platformName,
-      candidates: fs.readdirSync(directory)
+      candidates: listJavaScriptFiles(directory)
         .filter((fileName) => fileName.endsWith(".js"))
         .map((fileName) => {
           const filePath = path.join(directory, fileName);

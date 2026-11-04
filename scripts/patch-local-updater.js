@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * patch-local-updater.js - Enable the CodexDesktop-Rebuild Windows updater.
  *
@@ -3277,8 +3278,8 @@ function collectLocalUpdaterSources(asarRoot) {
       files[`.vite/build/${fileName}`] = fs.readFileSync(path.join(buildDir, fileName), "utf-8");
     }
   }
-  for (const fileName of fs.readdirSync(assetsDir)) {
-    if (/^(?:app-shell|app-initial|app-primary)-.*\.js$/.test(fileName)) {
+  for (const fileName of listJavaScriptFiles(assetsDir)) {
+    if (fileName.endsWith(".js")) {
       files[`webview/assets/${fileName}`] = fs.readFileSync(path.join(assetsDir, fileName), "utf-8");
     }
   }

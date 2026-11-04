@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * Add a sidebar hover delete button that delegates to the native
  * `delete-thread` menu item. The official dialog and deletion flow stay the
@@ -240,7 +241,7 @@ function patchSidebarSource(source) {
 function findTarget(platform) {
   const directory = path.join(SRC_DIR, platform, "_asar", "webview", "assets");
   if (!fs.existsSync(directory)) throw new Error(`missing sidebar assets for ${platform}`);
-  const candidates = fs.readdirSync(directory).filter((name) => /^app-(?:initial|primary)-.*\.js$/.test(name)).flatMap((name) => {
+  const candidates = listJavaScriptFiles(directory).filter((name) => name.endsWith(".js")).flatMap((name) => {
     const file = path.join(directory, name);
     const source = fs.readFileSync(file, "utf8");
     return source.includes("thread-primary-action") && source.includes("id:`delete-thread`")
