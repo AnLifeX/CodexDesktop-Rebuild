@@ -157,19 +157,21 @@ function applyLocalUpdaterPlan(sources) {
   return { ...next, plan };
 }
 
-test("selects and validates the titlebar after upstream moves it to app-primary", (t) => {
+for (const titlebarPath of ["webview/assets/app-primary-current.js", "webview/assets/async/465814.879bc2db3c.js"]) {
+test(`selects and validates the titlebar at ${titlebarPath}`, (t) => {
   const sources = makeCleanLocalUpdaterSources();
-  sources.files["webview/assets/app-primary-current.js"] = sources.files["webview/assets/app-shell-CVVppk_a.js"];
+  sources.files[titlebarPath] = sources.files["webview/assets/app-shell-CVVppk_a.js"];
   delete sources.files["webview/assets/app-shell-CVVppk_a.js"];
   const patched = applyLocalUpdaterPlan(sources);
-  assert.equal(patched.plan.validation.paths.titlebar, "webview/assets/app-primary-current.js");
+  assert.equal(patched.plan.validation.paths.titlebar, titlebarPath);
   assert.equal(planLocalUpdaterSources(patched).changes.length, 0);
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "updater-app-primary-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeLocalUpdaterSources(root, sources);
-  assert.equal(executeLocalUpdater({ asarRoot: root, check: true }).validation.paths.titlebar, "webview/assets/app-primary-current.js");
+  assert.equal(executeLocalUpdater({ asarRoot: root, check: true }).validation.paths.titlebar, titlebarPath);
 });
+}
 
 function writeLocalUpdaterSources(asarRoot, sources) {
   const write = (relative, text) => {

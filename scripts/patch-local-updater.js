@@ -3071,7 +3071,7 @@ function validateLocalUpdaterSources({ packageSource, files, expectedUpdateUrl }
 
   const titlebarEvidence = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^webview\/assets\/(?:app-shell|app-initial|app-primary)-.*\.js$/.test(fileName)) continue;
+    if (!/^webview\/assets\/.+\.js$/.test(fileName)) continue;
     if (!hasTitlebarSignature(String(source || ""))) continue;
     let inspection;
     try {
@@ -3138,7 +3138,7 @@ function selectMainMenuTarget(normalizedFiles) {
 function selectTitlebarTarget(normalizedFiles) {
   const candidates = [];
   for (const [fileName, source] of Object.entries(normalizedFiles)) {
-    if (!/^webview\/assets\/(?:app-shell|app-initial|app-primary)-.*\.js$/.test(fileName)) continue;
+    if (!/^webview\/assets\/.+\.js$/.test(fileName)) continue;
     if (hasTitlebarSignature(String(source || ""))) {
       try {
         candidates.push({ path: fileName, code: patchWebviewMenuBarCode(source) });
