@@ -15,11 +15,11 @@ const LOCAL_HOST_MARKER = "/* CodexRebuildLocalSessionHost */";
 const ROOT_HOST_MARKER = "/* CodexRebuildWorkspaceRootHost */";
 
 const LOCAL_HOST_PATTERN =
-  /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\.threadProjectAssignments\?\.\[\2\.conversationId\]/g;
+  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\.threadProjectAssignments\?\.\[\2\.conversationId\]/g;
 const ROOT_HOST_PATTERN =
-  /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\5\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
+  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\5\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
 const CURRENT_ROOT_HOST_PATTERN =
-  /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId([^;]*);(if\([^;]+\)continue;)let ([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\7\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
+  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId([^;]*);(if\([^;]+\)continue;)let ([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\7\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;
