@@ -1831,11 +1831,15 @@ function inspectModernUpdaterTitlebarSource(code, { allowLegacy = false } = {}) 
     WEBVIEW_DESCRIPTOR_END_MARKER,
     "Windows modern updater attachment",
   );
-  const componentBindings = ast.body.filter(
-    (statement) =>
-      statement.type === "FunctionDeclaration" &&
-      statement.id?.name === MODERN_UPDATER_COMPONENT,
-  );
+  const componentBindings = [];
+  let menuScope;
+  walkAst(ast, (node) => {
+    if ((node.type === "Program" || node.type === "BlockStatement") &&
+        node.body.includes(shape.menuFunction)) menuScope = node;
+    if (node.type === "FunctionDeclaration" && node.id?.name === MODERN_UPDATER_COMPONENT) {
+      componentBindings.push(node);
+    }
+  });
   const attachmentCalls = [];
   walkAst(ast, (node) => {
     if (
@@ -1851,6 +1855,11 @@ function inspectModernUpdaterTitlebarSource(code, { allowLegacy = false } = {}) 
     );
   }
   const attachment = attachmentCalls[0];
+  if (!menuScope?.body.includes(componentBindings[0]) ||
+      componentBindings[0].start < componentRange.start ||
+      componentBindings[0].end > componentRange.end) {
+    throw new Error("Windows modern updater component is detached from the menu-bar scope");
+  }
   if (
     !shape.rootChildren.elements.some(
       (element) => element?.start === attachment.start && element?.end === attachment.end,

@@ -101,6 +101,7 @@ const {
   makeMainMenuPatch,
   patchMainMenuCode,
   patchWebviewMenuBarCode,
+  validateUpdaterTitlebarSource,
   resolveRuntimeBootstrap,
   patchBootstrapCode,
   patchPreloadCode,
@@ -1328,6 +1329,23 @@ test("patchWebviewMenuBarCode preserves the modern inline Windows menu and appen
   const attachment = patched.indexOf("/* CodexRebuildUpdaterTitlebar:descriptor:start */");
   assert.ok(menuRoot >= 0 && attachment > menuRoot, "updater must be attached to the modern menu root");
   assert.strictEqual(patchWebviewMenuBarCode(patched), patched);
+});
+
+test("patches a webpack module menu in its own scope and rejects detached updater bindings", () => {
+  const source = 'export const __webpack_modules__={menu(e,t,n){var Ri=n("react"),Ji=n("jsx"),Mi=n("menu");' +
+    'function Yi(){let[t,n]=(0,Ri.useState)(null),r="application-menu-content",i="no-drag color-codex-application-menu-selection";return(0,Ji.jsxs)(Mi.Root,{className:"flex items-center gap-0.5",children:[(0,Ji.jsx)("button",{className:i,children:r}),null]})}' +
+    'n.d(t,{menu:()=>Yi})}};';
+  const patched = patchWebviewMenuBarCode(source);
+  assert.equal(patchWebviewMenuBarCode(patched), patched);
+  assert.doesNotThrow(() => validateUpdaterTitlebarSource(patched));
+  const start = patched.indexOf("/* CodexRebuildUpdaterTitlebar:component:start */");
+  const end = patched.indexOf("/* CodexRebuildUpdaterTitlebar:component:end */") +
+    "/* CodexRebuildUpdaterTitlebar:component:end */".length;
+  const component = patched.slice(start, end);
+  const without = patched.slice(0, start) + patched.slice(end);
+  assert.throws(() => validateUpdaterTitlebarSource(component + without), /detached.*scope/);
+  assert.throws(() => validateUpdaterTitlebarSource(without + 'function decoy(){' + component + '}'), /detached.*scope/);
+  assert.throws(() => validateUpdaterTitlebarSource(patched + 'function decoy(){function codexRebuildUpdaterTitlebar(){}}'), /expected exactly 1 target|live binding/);
 });
 
 test("resolves early-bootstrap to the hashed runtime and patches that backend idempotently", () => {
