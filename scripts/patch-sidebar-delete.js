@@ -47,7 +47,7 @@ function findOwnedFunctions(source, ast) {
   const row = functions.filter((node) => {
     const body = source.slice(node.start, node.end);
     return (
-      body.includes("`row-actions`") &&
+      /(["`])row-actions\1/.test(body) &&
       body.includes("additionalHoverActionCount") &&
       body.includes(`)(${hover[0].id.name},{`)
     );
@@ -131,10 +131,46 @@ function patchHover(source, node, trash) {
   return code.slice(0, aggregateMatch.index) + replacement + code.slice(aggregateEnd + 1);
 }
 
+function patchWebpackHover(source, node) {
+  const code = source.slice(node.start, node.end);
+  const props = /\{archive:([\w$]+),/;
+  if (!props.test(code)) throw new Error("native sidebar action props changed");
+  const aggregates = [];
+  const intlBindings = new Set();
+  const jsxBindings = new Set();
+  walk(node.body, (child) => {
+    if (child.type === "AssignmentExpression" && child.operator === "=" &&
+        child.left.type === "Identifier" && child.right.type === "ArrayExpression" &&
+        child.right.elements.length === 2 && child.right.elements.every((item) =>
+          item?.type === "SpreadElement" && item.argument.type === "Identifier")) aggregates.push(child);
+    if (child.type === "MemberExpression" && child.object.type === "Identifier") {
+      if (child.property.name === "formatMessage") intlBindings.add(child.object.name);
+      if (child.property.name === "jsx") jsxBindings.add(child.object.name);
+    }
+  });
+  if (aggregates.length !== 1 || intlBindings.size !== 1 || jsxBindings.size !== 1) {
+    throw new Error("native sidebar webpack render bindings changed");
+  }
+  const aggregate = aggregates[0];
+  const statement = node.body.body.find((item) => item.type === "ExpressionStatement" &&
+    item.start <= aggregate.start && item.end >= aggregate.end);
+  if (!statement) throw new Error("native sidebar action aggregation end changed");
+  const actions = aggregate.left.name;
+  const intl = [...intlBindings][0];
+  const jsx = [...jsxBindings][0];
+  const action = `;${actions}=CodexDeleteAction==null?${actions}:[...${actions},{${MARKER},ariaLabel:${intl}.formatMessage({id:\`sidebarElectron.deleteThread\`,defaultMessage:\`Permanently delete\`}),icon:(0,${jsx}.jsx)(\`svg\`,{viewBox:\`0 0 20 20\`,fill:\`none\`,stroke:\`currentColor\`,children:(0,${jsx}.jsx)(\`path\`,{d:\`M7 3h6M3 5h14M5 5l1 12h8l1-12M8 8v6M12 8v6\`})}),onClick:CodexDeleteAction.onSelect}];`;
+  const offset = statement.end - node.start;
+  let patched = code.slice(0, offset) + action + code.slice(offset);
+  patched = patched.replace(props, "{archive:$1,deleteAction:CodexDeleteAction,");
+  const empty = /if\(([^;]+)\)return null;/;
+  if (!empty.test(patched)) throw new Error("native sidebar empty-action guard changed");
+  return patched.replace(empty, (_match, condition) => `if(${condition}&&CodexDeleteAction==null)return null;`);
+}
+
 function patchRow(source, node, hoverName) {
   let code = source.slice(node.start, node.end);
   if (code.includes("awaitBeforeOpen") || code.includes("retainArchiveAction")) {
-    const menu = code.match(/getMenuItems:([\w$]+)\|\|([\w$]+)(\.disabled===!0)?\?\(\)=>?([\w$]+)\(`row-actions`\):void 0/);
+    const menu = code.match(/getMenuItems:([\w$]+)\|\|([\w$]+)(\.disabled===!0)?\?\(\)=>?([\w$]+)\(["`]row-actions["`]\):void 0/);
     if (!menu) throw new Error("native sidebar menu factory changed");
     const [, workMode, disabled, disabledProperty, menuFactory] = menu;
     const condition = `!${workMode}&&${disabledProperty ? `${disabled}.disabled!==!0` : `!${disabled}`}`;
@@ -218,14 +254,15 @@ function patchSidebarSource(source) {
     return { status: code === source ? "already" : "patched", code };
   }
   if (markerCount !== 0) throw new Error(`sidebar delete marker count is ${markerCount}`);
-  if (!source.includes("id:`delete-thread`")) {
+  if (!/id:(["`])delete-thread\1/.test(source)) {
     throw new Error("native delete-thread menu item is missing");
   }
 
   const { hover, row } = findOwnedFunctions(source, parse(source));
-  const trash = findTrashIcon(source);
+  const modern = (hover.body.body[0]?.declarations ?? []).filter((item) => item.init == null).length > 1;
+  const trash = modern ? null : findTrashIcon(source);
   const replacements = [
-    { start: hover.start, end: hover.end, code: patchHover(source, hover, trash) },
+    { start: hover.start, end: hover.end, code: modern ? patchWebpackHover(source, hover) : patchHover(source, hover, trash) },
     { start: row.start, end: row.end, code: patchRow(source, row, hover.id.name) },
   ].sort((a, b) => b.start - a.start);
   let code = source;
@@ -244,7 +281,7 @@ function findTarget(platform) {
   const candidates = listJavaScriptFiles(directory).filter((name) => name.endsWith(".js")).flatMap((name) => {
     const file = path.join(directory, name);
     const source = fs.readFileSync(file, "utf8");
-    return source.includes("thread-primary-action") && source.includes("id:`delete-thread`")
+    return source.includes("thread-primary-action") && /id:(["`])delete-thread\1/.test(source)
       ? [{ file, source }]
       : [];
   });
