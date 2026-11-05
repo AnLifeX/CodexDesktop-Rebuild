@@ -12,7 +12,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { parse } = require("acorn");
-const { SRC_DIR, relPath } = require("./patch-util");
+const { SRC_DIR, relPath, listJavaScriptFiles } = require("./patch-util");
 
 const ZH_CN_TRANSLATION_SPECS = [
   ["settings.nav.archived-chats", "归档聊天"],
@@ -1607,6 +1607,52 @@ function catalogPropertyKey(property) {
   return identifierName(property.key);
 }
 
+// Rspack locale modules export a static JSON catalog instead of an ESM object.
+function webpackCatalog(source, moduleId) {
+  const ast = parse(source, { ecmaVersion: "latest", sourceType: "module" });
+  const tables = ast.body.filter((node) => node.type === "ExportNamedDeclaration")
+    .flatMap((node) => node.declaration?.declarations ?? [])
+    .filter((node) => node.id?.name === "__webpack_modules__");
+  if (tables.length === 0) return null;
+  if (tables.length !== 1 || tables[0].init?.type !== "ObjectExpression") {
+    throw new Error("Expected one webpack locale module table");
+  }
+  const modules = tables[0].init.properties.filter((node) =>
+    moduleId == null || catalogPropertyKey(node) === moduleId);
+  const candidates = [];
+  for (const module of modules) {
+    const fn = module.value;
+    const parameter = fn?.params?.[0]?.name;
+    if (!parameter || fn.params.length !== 1 || parameter === "JSON" || fn.body?.body?.length !== 1) continue;
+    const assignment = fn.body.body[0].expression;
+    const left = assignment?.left;
+    const call = assignment?.right;
+    if (assignment?.type !== "AssignmentExpression" || assignment.operator !== "=" ||
+        left?.type !== "MemberExpression" || left.computed ||
+        left.object?.name !== parameter || left.property?.name !== "exports" ||
+        call?.type !== "CallExpression" || call.callee?.type !== "MemberExpression" ||
+        call.callee.computed || call.callee.object?.name !== "JSON" ||
+        call.callee.property?.name !== "parse" || call.arguments.length !== 1) continue;
+    const literal = call.arguments[0];
+    if (literal.type !== "Literal" || typeof literal.value !== "string") continue;
+    // Parse as an object expression too, so duplicate keys cannot be hidden by JSON.parse.
+    const object = parse("(" + literal.value + ")", { ecmaVersion: "latest" }).body[0].expression;
+    const messages = new Map();
+    for (const property of object.properties ?? []) {
+      const key = catalogPropertyKey(property);
+      if (key == null || typeof property.value?.value !== "string" || messages.has(key)) {
+        throw new Error("Invalid or duplicate webpack catalog key");
+      }
+      messages.set(key, property.value.value);
+    }
+    const json = JSON.parse(literal.value);
+    if (!json || Array.isArray(json) || typeof json !== "object") throw new Error("Invalid webpack catalog object");
+    candidates.push({ literal, messages });
+  }
+  if (candidates.length !== 1) throw new Error(`Expected one webpack catalog export, found ${candidates.length}`);
+  return candidates[0];
+}
+
 function patchCatalogSource(
   source,
   translations = ZH_CN_TRANSLATIONS,
@@ -1615,6 +1661,21 @@ function patchCatalogSource(
       ? ZH_CN_FORCED_OVERRIDES
       : new Map(),
 ) {
+  const webpack = webpackCatalog(source);
+  if (webpack) {
+    const { messages, literal } = webpack;
+    const replacements = [];
+    for (const [messageId, translation] of translations) {
+      const current = messages.get(messageId);
+      const desired = current == null ? translation : overrides.get(messageId);
+      if (desired == null || desired === current) continue;
+      messages.set(messageId, desired);
+      replacements.push({ messageId, translation: desired, status: current == null ? "added" : "updated", ...(current == null ? {} : { from: current }) });
+    }
+    const code = replacements.length === 0 ? source : source.slice(0, literal.start) +
+      JSON.stringify(JSON.stringify(Object.fromEntries(messages))) + source.slice(literal.end);
+    return { code, replacements };
+  }
   const ast = parse(source, { ecmaVersion: "latest", sourceType: "module" });
   const catalog = locateCatalogObject(ast);
   const properties = new Map();
@@ -1689,11 +1750,11 @@ function platformNames(platform) {
   );
 }
 
-function locateTargets(platform) {
+function locateTargets(platform, sourceDir = SRC_DIR) {
   const targets = [];
   for (const name of platformNames(platform)) {
     const assetsDir = path.join(
-      SRC_DIR,
+      sourceDir,
       name,
       "_asar",
       "webview",
@@ -1706,6 +1767,23 @@ function locateTargets(platform) {
     const matches = fs
       .readdirSync(assetsDir)
       .filter((file) => /^zh-CN-[A-Za-z0-9_-]+\.js$/.test(file));
+    if (matches.length === 0) {
+      const files = listJavaScriptFiles(assetsDir);
+      const bindings = [];
+      for (const file of files) {
+        const source = fs.readFileSync(path.join(assetsDir, file), "utf8");
+        if (!source.includes("../locales/zh-CN.json")) continue;
+        for (const match of source.matchAll(/"\.\.\/locales\/zh-CN\.json":function\(\)\{return (\w+)\.e\((\d+)\)\.then\(\1\.t\.bind\(\1,"([^"\n]+)",19\)\)\}/g)) {
+          bindings.push({ chunk: match[2], moduleId: match[3] });
+        }
+      }
+      if (bindings.length !== 1) throw new Error(`Expected one zh-CN locale binding, found ${bindings.length}`);
+      const binding = bindings[0];
+      for (const file of files.filter((file) => path.basename(file).startsWith(binding.chunk + "."))) {
+        const catalog = webpackCatalog(fs.readFileSync(path.join(assetsDir, file), "utf8"), binding.moduleId);
+        if (catalog) matches.push(file);
+      }
+    }
     if (matches.length !== 1) {
       throw new Error(
         `Expected one zh-CN catalog for ${name}, found ${matches.length}`,
@@ -1767,5 +1845,6 @@ module.exports = {
   ZH_CN_TRANSLATIONS,
   ZH_CN_TRANSLATION_SPECS,
   locateTargets,
+  webpackCatalog,
   patchCatalogSource,
 };
