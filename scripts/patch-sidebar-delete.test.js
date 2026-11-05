@@ -28,6 +28,14 @@ const SOURCE_1021 = SOURCE_1013
   .replace("getMenuItems:E||Re.disabled===!0?", "getMenuItems:E||K?")
   .replace("awaitBeforeOpen:void 0", "onBeforeOpen:K?void 0:prepareMenu,retainArchiveAction:false");
 
+const WEBPACK_SOURCE = SOURCE_1021
+  .replace('function Rail(e){', 'function Rail(e){let f,p;')
+  .replace('let f;', '')
+  .replace('let p;', '')
+  .replace('id:`thread-primary-action`', 'id:"thread-primary-action",ariaLabel:l.formatMessage({id:"archive"})')
+  .replace('id:`delete-thread`', 'id:"delete-thread"')
+  .replace('(`row-actions`)', '("row-actions")');
+
 test("adds only a hover action backed by the native delete item", () => {
   const first = patchSidebarSource(SOURCE);
   assert.equal(first.status, "patched");
@@ -78,7 +86,7 @@ test("requires the official delete menu item", () => {
 });
 
 test("click opens native confirmation with sync and async menus on both rails", async (t) => {
-  for (const [rail, source] of [["legacy", SOURCE], ["new", NEW_SOURCE], ["26.1013", SOURCE_1013], ["26.1021", SOURCE_1021]]) {
+  for (const [rail, source] of [["legacy", SOURCE], ["new", NEW_SOURCE], ["26.1013", SOURCE_1013], ["26.1021", SOURCE_1021], ["webpack", WEBPACK_SOURCE]]) {
     for (const asynchronous of [false, true]) await t.test(`${rail}, async=${asynchronous}`, async () => {
       const patched = patchSidebarSource(source).code;
       let confirmations = 0;
@@ -96,8 +104,10 @@ test("click opens native confirmation with sync and async menus on both rails", 
         prepareMenu: () => {},
         openNativeDeleteDialog: () => { confirmations += 1; },
       });
-      vm.runInContext(patched + `;var menuItems=[{id:\`delete-thread\`,onSelect:openNativeDeleteDialog}];menu=${asynchronous ? "async" : ""}()=>menuItems;`, context);
+      vm.runInContext(patched + `;var menuCalls=0;var menuItems=[{id:\`delete-thread\`,onSelect:openNativeDeleteDialog}];menu=${asynchronous ? "async" : ""}()=>{menuCalls++;return menuItems};`, context);
       const action = vm.runInContext("Rail(Row().props.renderActions({}).props).props.actions.find(action=>action.id===`thread-delete-action`)", context);
+      assert.equal(vm.runInContext("Rail(Row().props.renderActions({}).props).props.actions.filter(action=>action.id===`thread-delete-action`).length", context), 1);
+      assert.equal(context.menuCalls, 0, "rendering must not request native menu items");
       assert.equal(action.ariaLabel, rail === "legacy" ? "Permanently delete" : "sidebarElectron.deleteThread");
       assert.equal(confirmations, 0, "rendering must not open confirmation");
       await action.onClick();
@@ -105,13 +115,23 @@ test("click opens native confirmation with sync and async menus on both rails", 
       vm.runInContext("menuItems=[]", context);
       await action.onClick();
       assert.equal(confirmations, 1, "missing native item must not delete an ineligible thread");
-      if (rail === "26.1021") {
+      if (rail === "26.1021" || rail === "webpack") {
         for (const blocked of [source.replace("E=false", "E=true"), source.replace("disabled:false", "disabled:true")]) {
           vm.runInContext(patchSidebarSource(blocked).code, context);
           assert.equal(vm.runInContext("Rail(Row().props.renderActions({}).props).props.actions.some(action=>action.id===`thread-delete-action`)", context), false);
         }
       }
     });
+  }
+});
+
+test("webpack hoisted actions preserve memoized aggregation and reject ambiguous bindings", () => {
+  const first = patchSidebarSource(WEBPACK_SOURCE);
+  assert.equal(first.status, "patched");
+  assert.equal(patchSidebarSource(first.code).code, first.code);
+  assert.ok(first.code.includes('f=[...u,...d],t[6]=u,t[7]=d,t[8]=f):f=t[8];'));
+  for (const extra of ['other.formatMessage({});', 'other.jsx(Icon,{});', 'other=[...u,...d];']) {
+    assert.throws(() => patchSidebarSource(WEBPACK_SOURCE.replace('let u=[],d=[];', `let u=[],d=[];${extra}`)), /webpack render bindings changed/);
   }
 });
 
