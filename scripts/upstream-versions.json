@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-06T06:57:58.596Z",
+  "updatedAt": "2026-11-06T11:04:18.046Z",
   "platforms": {
     "macOS-arm64": {
       "version": "26.707.62119",
@@ -13,9 +13,9 @@
       "version": "26.1103.31037",
       "internalAppVersion": "26.1103.31037",
       "msixVersion": "26.1103.3517.0",
-      "rebuildRevision": 0,
-      "releaseVersion": "26.1103.31037",
-      "packageVersion": "26.1103.31037",
+      "rebuildRevision": 1,
+      "releaseVersion": "26.1103.31037-r1",
+      "packageVersion": "26.1103.31038-rebuild0001",
       "build": ""
     }
   }
