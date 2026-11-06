@@ -22,7 +22,7 @@ async function inspectPage(url) {
       id: 1,
       method: "Runtime.evaluate",
       params: {
-        expression: "({root:!!document.querySelector('#root')?.firstElementChild,titlebar:!!document.querySelector('.cru-trigger')?.getClientRects().length,text:document.body?.innerText?.trim().length??0})",
+        expression: "({root:!!document.querySelector('#root')?.firstElementChild,titlebar:!!document.querySelector('.cru-trigger')?.getClientRects().length,text:document.body?.innerText?.trim().length??0,sample:document.body?.innerText?.trim().slice(0,300)??''})",
         returnByValue: true,
       },
     }));
@@ -54,7 +54,7 @@ async function main() {
             console.log(`[ok] Windows app rendered (${rendered.text} visible characters)`);
             return;
           }
-          last = `root=${rendered?.root} titlebar=${rendered?.titlebar} visible characters=${rendered?.text}`;
+          last = `root=${rendered?.root} titlebar=${rendered?.titlebar} visible characters=${rendered?.text} text=${JSON.stringify(rendered?.sample)}`;
         }
       } catch (error) {
         last = error.message;
