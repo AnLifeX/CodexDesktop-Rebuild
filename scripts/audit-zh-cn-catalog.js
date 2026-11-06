@@ -14,9 +14,10 @@ const path = require("node:path");
 const { parse } = require("acorn");
 const {
   ZH_CN_TRANSLATIONS,
+  webpackCatalog,
   locateTargets: locateCatalogTargets,
 } = require("./patch-zh-cn-catalog");
-const { SRC_DIR, relPath } = require("./patch-util");
+const { SRC_DIR, relPath, listJavaScriptFiles } = require("./patch-util");
 
 const PLATFORMS = ["mac-arm64", "mac-x64", "win"];
 const CORE_UI_PATTERNS = [
@@ -151,6 +152,8 @@ function exportedDefaultBinding(ast) {
 
 function extractCatalogMessages(source, fileName = "<zh-CN catalog>") {
   const ast = parseModule(source, fileName);
+  const webpack = webpackCatalog(source);
+  if (webpack) return webpack.messages;
   const binding = exportedDefaultBinding(ast);
   const objects = [];
   walk(ast, (node) => {
@@ -182,8 +185,7 @@ function extractCatalogMessages(source, fileName = "<zh-CN catalog>") {
 function collectAssetDescriptors(assetsDir) {
   const descriptors = [];
   let parsedFiles = 0;
-  for (const fileName of fs.readdirSync(assetsDir).sort()) {
-    if (!fileName.endsWith(".js")) continue;
+  for (const fileName of listJavaScriptFiles(assetsDir)) {
     const filePath = path.join(assetsDir, fileName);
     const source = fs.readFileSync(filePath, "utf8");
     if (!source.includes("defaultMessage")) continue;

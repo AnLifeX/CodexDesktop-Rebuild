@@ -9,7 +9,12 @@ const {
   locateTargets,
   patchCatalogSource,
 } = require("./patch-zh-cn-catalog");
-const { extractCatalogMessages } = require("./audit-zh-cn-catalog");
+const { collectAssetDescriptors, extractCatalogMessages } = require("./audit-zh-cn-catalog");
+
+let currentDescriptors;
+function descriptorsFor(assetsDir) {
+  return currentDescriptors ??= collectAssetDescriptors(assetsDir).descriptors;
+}
 
 test("adds missing messages, preserves upstream translations, and applies explicit corrections", () => {
   const fixture = [
@@ -98,22 +103,12 @@ test("translation specs cover current voice settings and shortcut messages", () 
     "assets",
   );
   const required = new Map();
-  for (const name of fs.readdirSync(assetsDir)) {
-    if (!name.endsWith(".js")) continue;
-    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
-    for (const match of source.matchAll(
-      /id:`([^`]+)`,defaultMessage:`([^`]*)`/g,
-    )) {
-      const [, messageId, defaultMessage] = match;
-      if (
-        messageId.startsWith("codex.command.realtimeVoice") ||
+  for (const { id: messageId, defaultMessage } of descriptorsFor(assetsDir)) {
+    if (messageId.startsWith("codex.command.realtimeVoice") ||
         messageId.startsWith("codex.commandDescription.realtimeVoice") ||
         messageId.startsWith("settings.general.realtimeVoice") ||
-        messageId === "settings.general.microphoneInput.description" ||
-        messageId === "settings.voice.general"
-      ) {
-        required.set(messageId, defaultMessage);
-      }
+        messageId === "settings.general.microphoneInput.description" || messageId === "settings.voice.general") {
+      required.set(messageId, defaultMessage);
     }
   }
 
@@ -144,14 +139,8 @@ test("translation specs cover fork-from-older-turn action labels", () => {
     "assets",
   );
   const required = new Map();
-  for (const name of fs.readdirSync(assetsDir)) {
-    if (!/^local-conversation-thread-.*\.js$/.test(name)) continue;
-    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
-    for (const match of source.matchAll(
-      /id:`(localConversation\.forkFromOlderTurnDialog\.(?:local\.(?:label|workspaceLabel)|worktree\.label))`,defaultMessage:`([^`]*)`/g,
-    )) {
-      required.set(match[1], match[2]);
-    }
+  for (const { id, defaultMessage } of descriptorsFor(assetsDir)) {
+    if (/^localConversation\.forkFromOlderTurnDialog\.(?:local\.(?:label|workspaceLabel)|worktree\.label)$/.test(id)) required.set(id, defaultMessage);
   }
 
   assert.equal(required.size, 3, "expected all current fork action labels");
@@ -186,14 +175,8 @@ test("translation specs cover the queued-message side-chat action", () => {
     "assets",
   );
   const descriptors = [];
-  for (const name of fs.readdirSync(assetsDir)) {
-    if (!/^queued-message-list-.*\.js$/.test(name)) continue;
-    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
-    descriptors.push(
-      ...source.matchAll(
-        /id:`(composer\.queuedMessage\.openInSideChat)`,defaultMessage:`([^`]*)`/g,
-      ),
-    );
+  for (const { id, defaultMessage } of descriptorsFor(assetsDir)) {
+    if (id === "composer.queuedMessage.openInSideChat") descriptors.push([null, id, defaultMessage]);
   }
 
   assert.equal(descriptors.length, 1, "expected the queued side-chat action");
@@ -219,12 +202,8 @@ test("translation specs cover the confirmed visible UI gaps", () => {
     "assets",
   );
   const currentIds = new Set();
-  for (const name of fs.readdirSync(assetsDir)) {
-    if (!/^(?:app-initial|app-primary|automations-page)-.*\.js$/.test(name)) continue;
-    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
-    for (const match of source.matchAll(/id:`([^`]+)`,defaultMessage:`[^`]*`/g)) {
-      if (expected.has(match[1])) currentIds.add(match[1]);
-    }
+  for (const { id } of descriptorsFor(assetsDir)) {
+    if (expected.has(id)) currentIds.add(id);
   }
 
   assert.deepEqual([...currentIds].sort(), [...expected.keys()].sort());
@@ -426,12 +405,8 @@ test("translation specs cover the confirmed keyboard shortcut rows", () => {
     "assets",
   );
   const currentIds = new Set();
-  for (const name of fs.readdirSync(assetsDir)) {
-    if (!name.endsWith(".js")) continue;
-    const source = fs.readFileSync(path.join(assetsDir, name), "utf8");
-    for (const match of source.matchAll(/id:`([^`]+)`,defaultMessage:`[^`]*`/g)) {
-      if (expected.has(match[1])) currentIds.add(match[1]);
-    }
+  for (const { id } of descriptorsFor(assetsDir)) {
+    if (expected.has(id)) currentIds.add(id);
   }
 
   const dictationVariants = [
@@ -508,4 +483,41 @@ test("standard patch pipeline applies catalog messages before menu patches", () 
     patchAll.indexOf('"patch-zh-cn-catalog.js"') <
       patchAll.indexOf('"patch-native-menu-i18n.js"'),
   );
+});
+
+function webpackFixture(messages, id = "locale") {
+  return 'export const __webpack_modules__={' + id + '(e){e.exports=JSON.parse(' + JSON.stringify(JSON.stringify(messages)) + ')}};';
+}
+
+test("patches webpack JSON catalogs and audits the same messages without changing other modules", () => {
+  const source = webpackFixture({ existing: "保留", override: "旧值" }).replace("}};", '} ,decoy(e){e.exports="untouched"}};');
+  const translations = new Map([["existing", "不要覆盖"], ["override", "纠正"], ["added", "引号\"反斜线\\换行\n"]]);
+  const first = patchCatalogSource(source, translations, new Map([["override", "纠正"]]));
+  assert.equal(first.replacements.length, 2);
+  assert.ok(first.code.includes('decoy(e){e.exports="untouched"}'));
+  assert.deepEqual([...extractCatalogMessages(first.code)], [["existing", "保留"], ["override", "纠正"], ["added", translations.get("added")]]);
+  assert.equal(patchCatalogSource(first.code, translations).code, first.code);
+  assert.throws(() => patchCatalogSource('export const __webpack_modules__={a(e){e.exports=JSON.parse(' + JSON.stringify('{"x":"a","x":"b"}') + ')}};'), /duplicate/);
+});
+
+test("follows the zh-CN chunk and module binding and rejects ambiguous locales", () => {
+  const root = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "zh-binding-"));
+  const assets = path.join(root, "win", "_asar", "webview", "assets");
+  const asyncDir = path.join(assets, "async");
+  fs.mkdirSync(asyncDir, { recursive: true });
+  try {
+    const loader = 'var locales={"../locales/zh-CN.json":function(){return r.e(123).then(r.t.bind(r,"locale",19))}};';
+    fs.writeFileSync(path.join(asyncDir, "loader.js"), loader);
+    const target = path.join(asyncDir, "123.hash.js");
+    fs.writeFileSync(target, webpackFixture({ title: "简体中文" }));
+    fs.writeFileSync(path.join(asyncDir, "456.hash.js"), webpackFixture({ title: "繁體中文" }));
+    assert.deepEqual(locateTargets("win", root), [{ platform: "win", path: target }]);
+    fs.writeFileSync(path.join(asyncDir, "duplicate-loader.js"), loader);
+    assert.throws(() => locateTargets("win", root), /Expected one zh-CN locale binding, found 2/);
+    fs.unlinkSync(path.join(asyncDir, "duplicate-loader.js"));
+    fs.writeFileSync(target, webpackFixture({ title: "错误模块" }, "other"));
+    assert.throws(() => locateTargets("win", root), /Expected one webpack catalog export, found 0/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

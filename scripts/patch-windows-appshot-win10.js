@@ -108,7 +108,21 @@ function patchWebpackSource(source) {
   if (callback?.type !== "ArrowFunctionExpression" || callback.body.type !== "CallExpression") {
     throw new Error("Windows Appshot completion changed");
   }
-  const empty = one(find(attempt.block, node => node.type === "ReturnStatement" &&
+  // Only returns owned by startCapture release its transport; nested capture helpers have their own null paths.
+  const ownReturns = (root) => {
+    const returns = [];
+    function visit(node) {
+      if (!node || typeof node !== "object" || /^(?:Function|ArrowFunction)/.test(node.type)) return;
+      if (node.type === "ReturnStatement") returns.push(node);
+      for (const value of Object.values(node)) {
+        if (Array.isArray(value)) value.forEach(visit);
+        else if (value && typeof value === "object") visit(value);
+      }
+    }
+    visit(root);
+    return returns;
+  };
+  const empty = one(ownReturns(attempt.block).filter(node => node.type === "ReturnStatement" &&
     node.argument?.type === "Literal" && node.argument.value === null), "empty result");
   const cleanup = "if(closeCaptureTransport&&captureTransport)await captureTransport.close().catch(()=>void 0);";
   const changes = [

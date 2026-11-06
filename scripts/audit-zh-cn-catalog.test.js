@@ -113,5 +113,5 @@ test("audits the current extracted Windows catalog", () => {
   );
   assert.ok(!report.missing.some((item) => item.id === "composer.queuedMessage.openInSideChat"));
   assert.ok(fs.existsSync(report.catalogPath));
-  assert.equal(path.basename(report.catalogPath).startsWith("zh-CN-"), true);
+  assert.ok(extractCatalogMessages(fs.readFileSync(report.catalogPath, "utf8")).size > 1000);
 });

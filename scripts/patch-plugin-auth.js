@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * Post-build patch: Remove plugin auth gate + force browser-use available
  *
@@ -25,6 +26,8 @@ const {
   planRequiredRoles,
   commitValidatedPlan,
 } = require("./mac-contract-locator");
+
+const { webpackModules, importedCallIdentity } = require("./webpack-contracts");
 
 function walk(node, visitor) {
   if (!node || typeof node !== "object") return;
@@ -793,6 +796,14 @@ function collectWebviewHookTopology(ast) {
     }
   });
 
+  for (const module of webpackModules(ast)) {
+    for (const fn of module.functions) exportedFunctions.add(fn);
+    for (const identifier of module.identifiers) {
+      const fn = functionsByBinding.get(model.resolve(identifier));
+      if (fn) exportedFunctions.add(fn);
+    }
+  }
+
   const hooksByContext = new Map(
     [...FEATURE_CONTEXTS].map((context) => [context, []]),
   );
@@ -844,12 +855,13 @@ function collectWebviewHookTopology(ast) {
       walkOwnFunction(functionNode, (node) => {
         if (
           node.type !== "CallExpression" ||
-          node.callee?.type !== "Identifier" ||
+          (node.callee?.type !== "Identifier" && node.callee?.type !== "FunctionExpression") ||
           !callerFlow.feedsReturn(node)
         ) {
           return;
         }
-        const called = functionsByBinding.get(model.resolve(node.callee));
+        const called = node.callee.type === "FunctionExpression"
+          ? node.callee : functionsByBinding.get(model.resolve(node.callee));
         if (!called || reachableFunctions.has(called)) return;
         reachableFunctions.add(called);
         pending.push({ functionNode: called, depth: depth + 1 });
@@ -1109,7 +1121,8 @@ function collectStatsig(source, ast, comments, topology) {
       let target = null;
       if (
         inner.type === "CallExpression" &&
-        inner.callee?.type === "Identifier" &&
+        (inner.callee?.type === "Identifier" ||
+          importedCallIdentity(webpackModules(ast), hook, inner.callee) === "hZax:Zj") &&
         inner.arguments?.length === 1 &&
         /^\d{6,}$/.test(String(getLiteralValue(inner.arguments[0]) ?? ""))
       ) {
@@ -1988,7 +2001,7 @@ function findWindowsPluginCandidates(platformName) {
   const candidates = [];
   for (const root of roots) {
     if (!fs.existsSync(root.path)) continue;
-    for (const fileName of fs.readdirSync(root.path)) {
+    for (const fileName of listJavaScriptFiles(root.path)) {
       if (!fileName.endsWith(".js")) continue;
       if (root.kind === "main" && !/^(?:main-.*|early-bootstrap-\d+-[\da-f]+)\.js$/.test(fileName)) continue;
       const filePath = path.join(root.path, fileName);
@@ -2022,7 +2035,7 @@ function locateTargets(platform) {
     const assetsDir = path.join(SRC_DIR, plat, "_asar", "webview", "assets");
     if (!fs.existsSync(assetsDir)) continue;
 
-    for (const f of fs.readdirSync(assetsDir)) {
+    for (const f of listJavaScriptFiles(assetsDir)) {
       if (!f.endsWith(".js")) continue;
       const fp = path.join(assetsDir, f);
       const src = fs.readFileSync(fp, "utf-8");
@@ -2105,7 +2118,7 @@ function main() {
     const candidates = [];
     for (const root of roots) {
       if (!fs.existsSync(root)) continue;
-      for (const fileName of fs.readdirSync(root)) {
+      for (const fileName of listJavaScriptFiles(root)) {
         if (!fileName.endsWith(".js")) continue;
         const filePath = path.join(root, fileName);
         const source = fs.readFileSync(filePath, "utf-8");

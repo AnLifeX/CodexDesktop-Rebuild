@@ -1123,7 +1123,8 @@ test("reports recursive evidence files for every satisfied contract", (t) => {
   ]);
 });
 
-test("accepts Fast and plugin contracts consolidated into app-initial", (t) => {
+for (const bundle of ["app-initial-current.js", "async/465814.879bc2db3c.js"]) {
+test(`accepts Fast and plugin contracts consolidated into ${bundle}`, (t) => {
   const fixture = createFixture(t);
   const assetRoot = path.join(fixture.asarRoot, "webview", "assets");
   const consolidatedNames = [
@@ -1137,15 +1138,16 @@ test("accepts Fast and plugin contracts consolidated into app-initial", (t) => {
   for (const fileName of consolidatedNames) {
     fs.rmSync(path.join(assetRoot, fileName));
   }
-  writeExact(path.join(assetRoot, "app-initial-current.js"), consolidatedSource);
+  writeExact(path.join(assetRoot, bundle), consolidatedSource);
 
   const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
   const consolidatedEvidence =
-    "src/win/_asar/webview/assets/app-initial-current.js";
+    `src/win/_asar/webview/assets/${bundle}`;
   for (const contract of ["fast", "plugin"]) {
     assert.ok(result.contracts[contract].includes(consolidatedEvidence));
   }
 });
+}
 
 test("accepts the archive route in a current app-initial bundle", (t) => {
   const fixture = createFixture(t);
@@ -1160,6 +1162,20 @@ test("accepts the archive route in a current app-initial bundle", (t) => {
       "src/win/_asar/webview/assets/app-initial-archive-current.js",
     ),
   );
+});
+
+test("verifies every required contract after webview chunks get numeric nested paths", (t) => {
+  const fixture = createFixture(t);
+  const assetRoot = path.join(fixture.asarRoot, "webview", "assets");
+  const files = fs.readdirSync(assetRoot).filter((name) => name.endsWith(".js"));
+  fs.mkdirSync(path.join(assetRoot, "async"));
+  for (const [index, name] of files.entries()) {
+    fs.renameSync(path.join(assetRoot, name), path.join(assetRoot, "async", `${index}.1234567890.js`));
+  }
+  const result = verifyPatchedApp(fixture.root, "win", EXPECTED_VERSION);
+  for (const contract of ["fast", "plugin", "archive-delete", "updater"]) {
+    assert.ok(result.contracts[contract].some((file) => file.includes("/webview/assets/async/")));
+  }
 });
 
 test("combines package mismatch with every unsatisfied contract", (t) => {
