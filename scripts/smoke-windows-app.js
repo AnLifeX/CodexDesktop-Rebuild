@@ -3,11 +3,9 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn, execFileSync } = require("node:child_process");
-const { resolvePrimaryExecutableNameFromManifest } = require("./windows-app-entry");
 
-const root = path.join(__dirname, "..", "out");
-const manifest = fs.readFileSync(path.join(root, ".windows-msix", "AppxManifest.xml"), "utf8");
-const exe = path.join(root, "win", "Codex-win32-x64", resolvePrimaryExecutableNameFromManifest(manifest));
+const exe = process.argv[2];
+if (!exe || !fs.existsSync(exe)) throw new Error("Installed Windows executable is missing: " + exe);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "codex-smoke-"));
 const app = spawn(exe, [`--user-data-dir=${profile}`, "--remote-debugging-port=0"], {
   stdio: "ignore",
@@ -24,7 +22,7 @@ async function inspectPage(url) {
       id: 1,
       method: "Runtime.evaluate",
       params: {
-        expression: "({root:!!document.querySelector('#root')?.firstElementChild,text:document.body?.innerText?.trim().length??0})",
+        expression: "({root:!!document.querySelector('#root')?.firstElementChild,titlebar:!!document.querySelector('.cru-trigger')?.getClientRects().length,text:document.body?.innerText?.trim().length??0})",
         returnByValue: true,
       },
     }));
@@ -52,11 +50,11 @@ async function main() {
         const page = pages.find((item) => item.type === "page" && item.url === "app://-/index.html");
         if (page) {
           const rendered = await inspectPage(page.webSocketDebuggerUrl);
-          if (rendered?.root && rendered.text > 10) {
+          if (rendered?.root && rendered.titlebar && rendered.text > 10) {
             console.log(`[ok] Windows app rendered (${rendered.text} visible characters)`);
             return;
           }
-          last = `root=${rendered?.root} visible characters=${rendered?.text}`;
+          last = `root=${rendered?.root} titlebar=${rendered?.titlebar} visible characters=${rendered?.text}`;
         }
       } catch (error) {
         last = error.message;

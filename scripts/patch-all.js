@@ -26,6 +26,7 @@ const PATCHES = [
   "patch-windows-native-paths.js",
   "patch-windows-log-path.js",
   "patch-windows-tray.js",
+  "patch-download-progress.js",
   "patch-computer-use-win10.js",
   "patch-computer-use-win10-fallback.js",
   "patch-windows-appshot-win10.js",

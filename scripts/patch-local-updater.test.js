@@ -1348,6 +1348,18 @@ test("patches a webpack module menu in its own scope and rejects detached update
   assert.throws(() => validateUpdaterTitlebarSource(patched + 'function decoy(){function codexRebuildUpdaterTitlebar(){}}'), /expected exactly 1 target|live binding/);
 });
 
+test("modern updater renders when React uses the minified c binding", () => {
+  const source = "var c={useState:v=>[v,()=>{}],useRef:()=>({current:null}),useEffect:()=>{}};var j={jsx:()=>null,jsxs:()=>null};function Menu(){let[z,setZ]=(0,c.useState)(null),x=`application-menu-content`,y=`no-drag bg-[var(--color-token-menubar-selection-background)]`;return(0,j.jsxs)(m.Root,{className:`flex items-center gap-0.5 pr-2 pl-1`,children:[(0,j.jsx)(`button`,{className:y,children:x}),null]})}";
+  const patched = patchWebviewMenuBarCode(source);
+  const component = patched.slice(patched.indexOf("function codexRebuildUpdaterTitlebar()"), patched.indexOf("/* CodexRebuildUpdaterTitlebar:component:end */"));
+  const context = {
+    c: { useState: (value) => [value, () => {}], useRef: () => ({ current: null }), useEffect: () => {} },
+    j: { jsx: () => null, jsxs: () => null },
+    codexRebuildUpdaterMenuBarLabel: () => "检查更新",
+    codexRebuildUpdaterMenuBarProgress: () => null,
+  };
+  assert.doesNotThrow(() => vm.runInNewContext(`${component};codexRebuildUpdaterTitlebar()`, context));
+});
 test("resolves early-bootstrap to the hashed runtime and patches that backend idempotently", () => {
   assert.equal(typeof resolveRuntimeBootstrap, "function");
   assert.equal(typeof patchBootstrapCode, "function");
