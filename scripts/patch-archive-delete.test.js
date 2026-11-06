@@ -101,6 +101,19 @@ const CURRENT_ARIA_NATIVE_DATA_CONTROLS = [
   "export{Settings as DataControlsSettings}",
 ].join("");
 
+test("webpack archive manager ignores proxy getters and resolves its helper within the owning module", () => {
+  const source = `export const __webpack_modules__={proxy(e,t,n){class Proxy{get deleteArchivedConversation(){return(...args)=>this.manager.deleteArchivedConversation(...args)}get deleteAllArchivedConversations(){return()=>this.manager.deleteAllArchivedConversations()}}},decoy(e,t,n){async function runtimeDelete(){return null}},manager(e,t,n){${CURRENT_RUNTIME_NATIVE_APP_MAIN}}}`;
+  assert.equal(patchAppMainSource(source).mode, "native-api");
+  assert.throws(() => patchAppMainSource(source.replace("context.runtime.deleteArchivedThreads", "context.runtime.readArchivedThreads")), /structurally malformed/);
+});
+
+test("webpack archive UI must be reachable from the correct module export", () => {
+  const body = CURRENT_ARIA_NATIVE_DATA_CONTROLS.replace("export{Settings as DataControlsSettings}", "n.d(t,{Settings:()=>Settings})");
+  const source = `export const __webpack_modules__={controls(e,t,n){${body}}}`;
+  assert.equal(patchDataControlsSource(source).mode, "native");
+  assert.throws(() => patchDataControlsSource(source.replace("n.d(t,", "n.d(unrelated,")), /structurally malformed/);
+});
+
 test("archived pagination includes threads from a previous provider", async () => {
   const source = "async function list(client,cursor){return client.sendRequest(`thread/list`,{archived:!0,cursor,limit:100,modelProviders:null,sourceKinds:[`vscode`],useStateDbOnly:!0})}";
   const threads = [{ id: "old", provider: "local" }, { id: "new", provider: "custom" }];

@@ -27,6 +27,8 @@ const {
   commitValidatedPlan,
 } = require("./mac-contract-locator");
 
+const { webpackModules, importedCallIdentity } = require("./webpack-contracts");
+
 function walk(node, visitor) {
   if (!node || typeof node !== "object") return;
   if (node.type) visitor(node);
@@ -794,6 +796,14 @@ function collectWebviewHookTopology(ast) {
     }
   });
 
+  for (const module of webpackModules(ast)) {
+    for (const fn of module.functions) exportedFunctions.add(fn);
+    for (const identifier of module.identifiers) {
+      const fn = functionsByBinding.get(model.resolve(identifier));
+      if (fn) exportedFunctions.add(fn);
+    }
+  }
+
   const hooksByContext = new Map(
     [...FEATURE_CONTEXTS].map((context) => [context, []]),
   );
@@ -845,12 +855,13 @@ function collectWebviewHookTopology(ast) {
       walkOwnFunction(functionNode, (node) => {
         if (
           node.type !== "CallExpression" ||
-          node.callee?.type !== "Identifier" ||
+          (node.callee?.type !== "Identifier" && node.callee?.type !== "FunctionExpression") ||
           !callerFlow.feedsReturn(node)
         ) {
           return;
         }
-        const called = functionsByBinding.get(model.resolve(node.callee));
+        const called = node.callee.type === "FunctionExpression"
+          ? node.callee : functionsByBinding.get(model.resolve(node.callee));
         if (!called || reachableFunctions.has(called)) return;
         reachableFunctions.add(called);
         pending.push({ functionNode: called, depth: depth + 1 });
@@ -1110,7 +1121,8 @@ function collectStatsig(source, ast, comments, topology) {
       let target = null;
       if (
         inner.type === "CallExpression" &&
-        inner.callee?.type === "Identifier" &&
+        (inner.callee?.type === "Identifier" ||
+          importedCallIdentity(webpackModules(ast), hook, inner.callee) === "hZax:Zj") &&
         inner.arguments?.length === 1 &&
         /^\d{6,}$/.test(String(getLiteralValue(inner.arguments[0]) ?? ""))
       ) {

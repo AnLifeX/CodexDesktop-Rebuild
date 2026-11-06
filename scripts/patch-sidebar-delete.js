@@ -254,7 +254,8 @@ function patchSidebarSource(source) {
     return { status: code === source ? "already" : "patched", code };
   }
   if (markerCount !== 0) throw new Error(`sidebar delete marker count is ${markerCount}`);
-  if (!/id:(["`])delete-thread\1/.test(source)) {
+  // Current webpack rows receive their native menu factory from another module.
+  if (!/id:(["`])delete-thread\1/.test(source) && !source.includes("__webpack_modules__")) {
     throw new Error("native delete-thread menu item is missing");
   }
 
@@ -281,7 +282,9 @@ function findTarget(platform) {
   const candidates = listJavaScriptFiles(directory).filter((name) => name.endsWith(".js")).flatMap((name) => {
     const file = path.join(directory, name);
     const source = fs.readFileSync(file, "utf8");
-    return source.includes("thread-primary-action") && /id:(["`])delete-thread\1/.test(source)
+    return source.includes("thread-primary-action") &&
+      (/id:(["`])delete-thread\1/.test(source) ||
+        (source.includes("__webpack_modules__") && source.includes('"row-actions"') && source.includes('"context-menu"')))
       ? [{ file, source }]
       : [];
   });
