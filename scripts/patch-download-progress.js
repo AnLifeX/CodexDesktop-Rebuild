@@ -8,13 +8,13 @@ function patchDownloadProgressSource(source) {
   if (source.includes(MARKER)) return { code: source, status: "already" };
   let count = 0;
   const code = source.replace(
-    /([\w$]+)\.on\(`updated`,\(\)=>\{[^{}]*?\.setProgressBar\(([\w$]+)\(\)\)/g,
+    /([\w$]+)\.on\([`"\x27]updated[`"\x27],\(\)=>\{[^{}]*?\.setProgressBar\(([\w$]+(?:\(\)|\/[\w$]+))\)/g,
     (match, item, progress) => {
       count++;
       // Recoverable interruptions emit updated without done; clear until transfer resumes.
       return match.replace(
-        `.setProgressBar(${progress}())`,
-        `.setProgressBar(${MARKER}${item}.getState()===\`interrupted\`||${item}.isPaused()?-1:${progress}())`,
+        `.setProgressBar(${progress})`,
+        `.setProgressBar(${MARKER}${item}.getState()===\`interrupted\`||${item}.isPaused()?-1:${progress})`,
       );
     },
   );

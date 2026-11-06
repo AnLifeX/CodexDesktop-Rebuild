@@ -8,7 +8,7 @@ const { patchDownloadProgressSource } = require("./patch-download-progress");
 
 const source = fs.readFileSync(path.join(__dirname, "fixtures/download-progress.js"), "utf8");
 
-function download(options = {}) {
+function download(options = {}, input = source) {
   const session = new EventEmitter();
   const item = Object.assign(new EventEmitter(), {
     state: "progressing", paused: false, bytes: 25,
@@ -29,7 +29,7 @@ function download(options = {}) {
     w: { default: path.posix }, L: { default: { platform: "win32" } },
     Bbt: (value) => value, Gbt: (value) => value, nxt: Error,
   };
-  vm.runInNewContext(patchDownloadProgressSource(source).code + ";this.start=ixt", context);
+  vm.runInNewContext(patchDownloadProgressSource(input).code + ";this.start=ixt", context);
   context.start(session, options, (error, result) => results.push({ error, result }));
   session.emit("will-download", {}, item, {});
   return { item, window, progress, results };
@@ -48,6 +48,14 @@ test("interrupted download clears the icon and resuming restores progress withou
   assert.deepEqual(progress, [0.25, -1, 0.6]);
 });
 
+test("current upstream handler clears interrupted progress", () => {
+  const current = source.replace("d.on(`updated`", 'd.on("updated"').replace(".setProgressBar(c())", ".setProgressBar(i/o)");
+  const { item, progress } = download({}, current);
+  item.emit("updated");
+  item.state = "interrupted";
+  item.emit("updated");
+  assert.deepEqual(progress, [0.25, -1]);
+});
 test("pause clears the icon, resume restores it, and showProgressBar false is respected", () => {
   const { item, progress } = download();
   item.paused = true;
