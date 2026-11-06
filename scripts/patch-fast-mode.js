@@ -14,8 +14,11 @@ const {
   commitValidatedPlan,
 } = require("./mac-contract-locator");
 
+const { webpackModules, importedCallIdentity } = require("./webpack-contracts");
+
 const CHATGPT_AUTH = "chatgpt";
 const APIKEY_AUTH = "apikey";
+const SERVICE_ACCESS_DECODER = "eWgO:W6";
 const REQUEST_AUTH_MARKER = "/* CodexRebuildFastModeRequestAuth */";
 const MODEL_CAPABILITY_MARKER = "/* CodexRebuildFastModeModelCapabilityOnly */";
 const UNRESTRICTED_MARKERS = new Map([
@@ -199,17 +202,18 @@ function addPatch(patches, patch) {
 
 function collectPatches(ast, source) {
   const patches = [];
+  const wrappers = new Set(webpackModules(ast).map(({ fn }) => fn));
 
   walk(ast, (node) => {
     // Match function bodies containing Fast mode auth logic.
-    if (!isFunctionNode(node)) return;
+    if (!isFunctionNode(node) || wrappers.has(node)) return;
 
     const fnSrc = sourceFor(source, node);
     if (!fnSrc.includes("fast_mode") || !fnSrc.includes(CHATGPT_AUTH)) return;
     const patchStartIndex = patches.length;
 
     let roleId = null;
-    walk(node, (child, parent) => {
+    walkFunctionContract(node, (child, parent) => {
       if (child.type !== "BinaryExpression") return;
 
       const childSrc = sourceFor(source, child);
@@ -311,7 +315,7 @@ function collectPatches(ast, source) {
 }
 
 function collectServiceTierAccessTargets(ast, source) {
-  if (!source.includes("serviceTierAccess")) return [];
+  const modules = webpackModules(ast);
   const targets = [];
   const accessHelpers = new Set();
   const functions = [];
@@ -330,8 +334,10 @@ function collectServiceTierAccessTargets(ast, source) {
           exactAuthPair(node, source, "||", "===", "personalAccessToken", "amazonBedrock") != null) auth = true;
       if (node.type === "ConditionalExpression" && node.alternate.type === "Literal" &&
           node.alternate.value === null && node.consequent.type === "CallExpression" &&
-          node.consequent.callee.type === "Identifier" && node.consequent.arguments.length === 1) {
-        helpers.push(node.consequent.callee.name);
+          node.consequent.arguments.length === 1) {
+        const identity = node.consequent.callee.type === "Identifier"
+          ? node.consequent.callee.name : importedCallIdentity(modules, fn, node.consequent.callee);
+        if (node.consequent.callee.type === "Identifier" || identity === SERVICE_ACCESS_DECODER) helpers.push(identity);
       }
     });
     if (!settings || !loading || !auth || helpers.length !== 1) continue;
@@ -353,7 +359,8 @@ function collectServiceTierAccessTargets(ast, source) {
     const [cache, decode] = result.expressions;
     if (cache.type !== "CallExpression" || memberPropertyName(cache.callee) !== "setData" ||
         memberPropertyName(cache.callee.object) !== "query" || cache.arguments.length !== 3 ||
-        decode.type !== "CallExpression" || !accessHelpers.has(decode.callee.name) ||
+        decode.type !== "CallExpression" || !(accessHelpers.has(decode.callee.name) ||
+          importedCallIdentity(modules, fn, decode.callee) === SERVICE_ACCESS_DECODER) ||
         decode.arguments.length !== 1 ||
         sourceFor(source, decode.arguments[0]) !== sourceFor(source, cache.arguments[2])) continue;
     targets.push({ id: "fast_mode_request_auth_gate", targetStart: fn.start, access: true });
@@ -363,11 +370,17 @@ function collectServiceTierAccessTargets(ast, source) {
 
 function collectAlreadyPatchedGates(ast, source, comments) {
   const already = [];
+  const wrappers = new Set(webpackModules(ast).map(({ fn }) => fn));
   walk(ast, (node, parent) => {
-    if (!isFunctionNode(node)) return;
+    if (!isFunctionNode(node) || wrappers.has(node)) return;
     const fnSrc = sourceFor(source, node);
     for (const [id, marker] of UNRESTRICTED_MARKERS) {
       if (!fnSrc.includes(marker)) continue;
+      let nestedMarker = false;
+      walk(node.body, (child) => {
+        if (isFunctionNode(child) && sourceFor(source, child).includes(marker)) nestedMarker = true;
+      });
+      if (nestedMarker) continue;
       const booleanBody = unrestrictedBody(id, false);
       const settingsBody = unrestrictedBody(id, true);
       const accessBody = unrestrictedBody(id, id === "fast_mode_settings_auth_gate", true);
@@ -562,6 +575,7 @@ function analyzeFastModeSource(source) {
     patches,
     targetIds: [...new Set(targets.map((target) => target.id))],
     targetCounts,
+    targets,
   };
 }
 
@@ -659,11 +673,16 @@ function roleMarkerEvidence(source, targetId) {
     return [];
   }
 
+  const wrappers = new Set(webpackModules(ast).map(({ fn }) => fn));
   let markerCount = collectServiceTierAccessTargets(ast, source).filter((target) => target.id === targetId).length;
   walk(ast, (node) => {
-    if (!isFunctionNode(node)) return;
+    if (!isFunctionNode(node) || wrappers.has(node)) return;
     if (sourceFor(source, node).includes(UNRESTRICTED_MARKERS.get(targetId))) {
-      markerCount += 1;
+      let nestedMarker = false;
+      walk(node.body, (child) => {
+        if (isFunctionNode(child) && sourceFor(source, child).includes(UNRESTRICTED_MARKERS.get(targetId))) nestedMarker = true;
+      });
+      if (!nestedMarker) markerCount += 1;
       return;
     }
     let hasFastModeFeatureAccess = false;
@@ -763,6 +782,35 @@ function planMacFastModePlatform({ platform, candidates }) {
   };
 }
 
+function planWebpackFastModePlatform({ platform, candidates }) {
+  const roles = [];
+  for (const [index, targetId] of FAST_MODE_CONTRACT_IDS.entries()) {
+    const matches = candidates.map((candidate) => ({
+      candidate, probe: probeMacFastModeRole(candidate, targetId),
+    })).filter(({ probe }) => probe.state !== "irrelevant");
+    const identities = new Set();
+    for (const { candidate, probe } of matches) {
+      if (probe.state !== "exact") continue;
+      const ast = parse(candidate.source, { ecmaVersion: "latest", sourceType: "module" });
+      const target = probe.result.targets.find((target) => target.id === targetId);
+      const owner = webpackModules(ast).find(({ fn }) =>
+        fn.start < target.targetStart && fn.end > target.targetStart);
+      if (!owner) throw new Error(`${targetId} has no owning webpack module`);
+      identities.add(owner.id);
+    }
+    if (identities.size > 1) throw new Error(`${targetId} has ambiguous webpack module identities`);
+    const role = index === 0 ? "fast-settings" : "fast-request";
+    // Webpack repeats one module in several lazy chunks; every physical copy must pass.
+    if (matches.length === 0) roles.push({ role, candidates: [], probe: () => ({ state: "irrelevant" }) });
+    matches.forEach(({ candidate, probe }, replica) => roles.push({
+      role: replica === 0 ? role : `${role}-${replica}`,
+      candidates: [candidate], probe: () => probe,
+    }));
+  }
+  const plan = planRequiredRoles({ platform, roles });
+  return { status: "ready", plan, writes: plan.roles.map(selectedFastModeWrite) };
+}
+
 function planFastModePlatform({
   platform,
   candidates,
@@ -770,6 +818,9 @@ function planFastModePlatform({
 }) {
   if (platform.startsWith("mac-")) {
     return planMacFastModePlatform({ platform, candidates });
+  }
+  if (candidates.some(({ source }) => source.includes("__webpack_modules__"))) {
+    return planWebpackFastModePlatform({ platform, candidates });
   }
   const namedCandidates = new Map(
     FAST_MODE_CONTRACT_IDS.map((targetId) => [
@@ -902,7 +953,8 @@ function main() {
         (pattern) => pattern.test(f),
       );
       if (plat === "win" && !isNamedWindowsTarget &&
-          !src.includes("fast_mode") && !src.includes("CodexRebuildFastMode")) {
+          !src.includes("fast_mode") && !src.includes("serviceTierAccess") &&
+          !src.includes("amazonBedrock") && !src.includes("CodexRebuildFastMode")) {
         continue;
       }
       candidates.push({ platform: plat, path: fp, fileName: f, source: src });

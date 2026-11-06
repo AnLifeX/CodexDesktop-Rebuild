@@ -24,6 +24,8 @@ const {
 
 // ─── Layer 1: app-main route injection ──────────────────────────
 
+const { webpackModules } = require("./webpack-contracts");
+
 function patchAppMain(bundles) {
   let patched = 0;
   for (const bundle of bundles) {
@@ -511,6 +513,7 @@ function createArchiveReachability(ast) {
     }
     return null;
   };
+  const modules = webpackModules(ast);
   const reachable = new Set([ast]);
   const queue = [ast];
   const enqueue = (fn) => {
@@ -525,6 +528,10 @@ function createArchiveReachability(ast) {
     for (const specifier of statement.specifiers ?? []) {
       if (specifier.local?.type === "Identifier") enqueue(resolve(ast, specifier.local.name));
     }
+  }
+  for (const module of modules) {
+    for (const fn of module.functions) enqueue(fn);
+    for (const identifier of module.identifiers) enqueue(resolve(module.fn, identifier.name));
   }
   function walkExecutableOwner(node, owner, parent = null) {
     if (!node || typeof node !== "object") return;
@@ -960,10 +967,10 @@ function nativeArchiveManagerEvidence(ast) {
   walkArchive(ast, (node) => {
     if (node.type !== "ClassBody") return;
     const single = node.body.filter(
-      (item) => item.type === "MethodDefinition" && item.key?.name === "deleteArchivedConversation",
+      (item) => item.type === "MethodDefinition" && item.kind === "method" && item.key?.name === "deleteArchivedConversation",
     );
     const all = node.body.filter(
-      (item) => item.type === "MethodDefinition" && item.key?.name === "deleteAllArchivedConversations",
+      (item) => item.type === "MethodDefinition" && item.kind === "method" && item.key?.name === "deleteAllArchivedConversations",
     );
     relevantMethods.push(...single, ...all);
     if (single.length !== 1 || all.length !== 1) return;
@@ -981,7 +988,9 @@ function nativeArchiveManagerEvidence(ast) {
     const runtimeDelegated =
       runtimeSingleHelper != null &&
       runtimeSingleHelper === runtimeAllHelper &&
-      nativeArchiveRuntimeManagerHelperIsValid(ast, runtimeSingleHelper);
+      nativeArchiveRuntimeManagerHelperIsValid(
+        webpackModules(ast).find(({ fn }) => fn.start < node.start && fn.end > node.end)?.fn ?? ast,
+        runtimeSingleHelper);
     if (inline || delegated || runtimeDelegated) candidates.push(node);
   });
   if (relevantMethods.length > 0 && candidates.length !== 1) {

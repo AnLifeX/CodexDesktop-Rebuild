@@ -32,6 +32,26 @@ test("Webpack Appshot closes per-capture helpers on completion, empty result and
   }
 });
 
+test("webpack Appshot leaves nested capture helper null returns untouched", async () => {
+  const nested = "(async()=>{if(outcome==='empty')return null;return {transitionId:'test'}})()";
+  const source = `const bridge=function({decorateApp:e=async()=>null,loadHelperTransport:t}){function acquire(){return t(controller.signal)}return {async startCapture(){try{let t=await wait(acquire(),signal),s=await ${nested};if(null==s)return null;let y=done();return active.add(y),y.finally(()=>active.delete(y)),{result:"started"}}catch(e){return logger.warning("Windows Appshot start failed"),null}}}};`;
+  const patched = patchMainSource(source);
+  assert.ok(patched.includes(nested));
+  for (const outcome of ["empty", "started"]) {
+    let closed = 0;
+    const context = vm.createContext({
+      outcome, process: { getSystemVersion: () => "10.0.19045" }, signal: undefined,
+      controller: { signal: undefined }, wait: async (value) => value,
+      done: () => Promise.resolve(), active: new Set(), logger: { warning() {} },
+      loader: async () => ({ close: async () => { closed++; } }),
+    });
+    await vm.runInContext(patched + "bridge({loadHelperTransport:loader}).startCapture()", context);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(closed, 1);
+  }
+  assert.equal(patchMainSource(patched), patched);
+});
+
 test("uses a one-shot helper for Appshot on legacy Windows and closes it", () => {
   const source = `${FUNCTION_ANCHOR}let e=c,n=t(e.signal).thenxxx${ORIGINAL_CAPTURE}`;
   const patched = patchMainSource(source);

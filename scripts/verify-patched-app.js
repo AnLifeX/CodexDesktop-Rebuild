@@ -790,6 +790,8 @@ function inspectFastContract(sources) {
     const candidates = patchCandidates(sources, ["webview/assets"]).filter(
       ({ fileName, source }) =>
         source.includes("fast_mode") ||
+        source.includes("serviceTierAccess") ||
+        source.includes("amazonBedrock") ||
         source.includes("CodexRebuildFastModeModelCapabilityOnly") ||
         /^use-service-tier-settings-.*\.js$/.test(fileName) ||
         /^read-service-tier-for-request-.*\.js$/.test(fileName),
