@@ -171,7 +171,6 @@ jobs:
           pwsh -NoProfile -File scripts/CodexUpdater.test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: npm run build:win-x64
-      - run: node scripts/smoke-windows-app.js
 
       - name: Build full-only Windows installer
         if: inputs.skip_windows_delta == true
@@ -256,6 +255,14 @@ jobs:
           } finally {
             Pop-Location
           }
+
+      - name: Smoke test installed Windows UI
+        shell: pwsh
+        run: |
+          $version = "${{ steps.windows_artifacts.outputs.windows_installer_version }}"
+          $packageVersion = "${{ steps.windows_artifacts.outputs.windows_package_version }}"
+          $installer = Join-Path $PWD.Path "out/make/squirrel.windows/x64/CodexSetup-win-x64-$version.exe"
+          pwsh -NoProfile -File scripts/smoke-installed-windows-app.ps1 -Installer $installer -PackageVersion $packageVersion
 
       - name: Prepare Windows update feed artifact
         shell: pwsh

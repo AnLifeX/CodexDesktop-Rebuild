@@ -156,8 +156,6 @@ jobs:
       - name: Build Windows portable app
         run: npm run build:win-x64
 
-      - name: Smoke test packaged Windows UI
-        run: node scripts/smoke-windows-app.js
 
       - name: Build Windows installer with required delta
         id: windows_delta
@@ -228,6 +226,14 @@ jobs:
           } finally {
             Pop-Location
           }
+
+      - name: Smoke test installed Windows UI
+        shell: pwsh
+        run: |
+          $version = "${{ steps.windows_artifacts.outputs.windows_installer_version }}"
+          $packageVersion = "${{ steps.windows_artifacts.outputs.windows_package_version }}"
+          $installer = Join-Path $PWD.Path "out/make/squirrel.windows/x64/CodexSetup-win-x64-$version.exe"
+          pwsh -NoProfile -File scripts/smoke-installed-windows-app.ps1 -Installer $installer -PackageVersion $packageVersion
 
       - name: Prepare Windows update feed artifact
         shell: pwsh

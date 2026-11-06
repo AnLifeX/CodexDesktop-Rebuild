@@ -21,8 +21,8 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 13;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const LOCAL_UPDATER_CONTRACT_VERSION = 14;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";
@@ -1724,13 +1724,13 @@ function makeModernWebviewTitlebarComponent(shape, version = LOCAL_UPDATER_CONTR
   const helpers = legacyBody
     .slice(0, legacyComponentStart)
     .replaceAll("Zr.", `${shape.jsxAlias}.`);
-  const component = `function ${MODERN_UPDATER_COMPONENT}(){let[r,i]=(0,${shape.reactAlias}.useState)({status:'idle'}),[a,o]=(0,${shape.reactAlias}.useState)(false),c=(0,${shape.reactAlias}.useRef)(null);
+  const component = `function ${MODERN_UPDATER_COMPONENT}(){let[r,i]=(0,${shape.reactAlias}.useState)({status:'idle'}),[a,o]=(0,${shape.reactAlias}.useState)(false),codexRebuildUpdaterAnchorRef=(0,${shape.reactAlias}.useRef)(null);
   (0,${shape.reactAlias}.useEffect)(()=>{codexRebuildUpdaterEnsureTitlebarStyle();let e=window.codexRebuildUpdater;if(!e)return;let t=e=>{i(e||{status:'idle'})};e.getState?.().then(t).catch(()=>{});let n=e.onState?.(t);return typeof n==='function'?n:void 0},[]);
-  (0,${shape.reactAlias}.useEffect)(()=>{if(!a)return;let r=codexRebuildUpdaterShowPanel(c.current),e=e=>{c.current?.contains?.(e.target)||o(false)},t=e=>{e.key==='Escape'&&o(false)};return document.addEventListener('pointerdown',e,true),document.addEventListener('keydown',t,true),()=>{r?.(),document.removeEventListener('pointerdown',e,true),document.removeEventListener('keydown',t,true)}},[a]);
+  (0,${shape.reactAlias}.useEffect)(()=>{if(!a)return;let r=codexRebuildUpdaterShowPanel(codexRebuildUpdaterAnchorRef.current),e=e=>{codexRebuildUpdaterAnchorRef.current?.contains?.(e.target)||o(false)},t=e=>{e.key==='Escape'&&o(false)};return document.addEventListener('pointerdown',e,true),document.addEventListener('keydown',t,true),()=>{r?.(),document.removeEventListener('pointerdown',e,true),document.removeEventListener('keydown',t,true)}},[a]);
   let u=(e,t={})=>i(n=>({...n,...t,status:e}));
   let d=e=>{let t=window.codexRebuildUpdater;if(e==='close'){o(false);return}if(e==='clear'){o(false),t?.clearUpdateState?.().then(i).catch(()=>{});return}if(e==='cancel'){t?.cancelDownload?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='check'){o(true),u('checking',{error:null}),t?.checkForUpdates?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='retry'){o(true),u('downloading',{error:null}),t?.retryUpdate?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='download'){o(true),u('downloading',{error:null,downloadedBytes:r?.downloadedBytes||0,elapsedMs:0}),t?.downloadUpdate?.().then(i).catch(e=>u('error',{error:e&&e.message?e.message:String(e)}));return}if(e==='install'){t?.installUpdate?.().catch(e=>u('error',{error:e&&e.message?e.message:String(e)}))}};
   let f=()=>{let e=r?.status||'idle';if(e==='idle'){d('check');return}o(e=>!e)},p=codexRebuildUpdaterMenuBarLabel(r),m=codexRebuildUpdaterMenuBarProgress(r),h=m==null?0:Math.floor(m);
-  return(0,${shape.jsxAlias}.jsxs)('div',{ref:c,className:'cru-anchor',children:[(0,${shape.jsxAlias}.jsxs)('button',{type:'button','aria-expanded':a,'aria-haspopup':'dialog','aria-label':p,className:'cru-trigger '+(r?.status||'idle')+(a?' open':''),style:{'--cru-progress':h+'%'},onClick:f,children:[(0,${shape.jsxAlias}.jsx)('span',{className:'cru-mark','aria-hidden':'true'}),(0,${shape.jsxAlias}.jsx)('span',{className:'cru-label',children:p})]}),a&&codexRebuildUpdaterBuildPanel(r,d)]})
+  return(0,${shape.jsxAlias}.jsxs)('div',{ref:codexRebuildUpdaterAnchorRef,className:'cru-anchor',children:[(0,${shape.jsxAlias}.jsxs)('button',{type:'button','aria-expanded':a,'aria-haspopup':'dialog','aria-label':p,className:'cru-trigger '+(r?.status||'idle')+(a?' open':''),style:{'--cru-progress':h+'%'},onClick:f,children:[(0,${shape.jsxAlias}.jsx)('span',{className:'cru-mark','aria-hidden':'true'}),(0,${shape.jsxAlias}.jsx)('span',{className:'cru-label',children:p})]}),a&&codexRebuildUpdaterBuildPanel(r,d)]})
 }`;
   const body = `${helpers}${component}`;
   if (version == null) return body;
