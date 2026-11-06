@@ -22,7 +22,7 @@ async function inspectPage(url) {
       id: 1,
       method: "Runtime.evaluate",
       params: {
-        expression: "({root:!!document.querySelector('#root')?.firstElementChild,titlebar:!!document.querySelector('.cru-trigger')?.getClientRects().length,text:document.body?.innerText?.trim().length??0,sample:document.body?.innerText?.trim().slice(0,300)??''})",
+        expression: "({root:!!document.querySelector('#root')?.firstElementChild,titlebar:!!document.querySelector('.cru-trigger')?.getClientRects().length,signIn:document.body?.innerText?.includes('Sign in to ChatGPT')&&document.body?.innerText?.includes('Sign in another way'),text:document.body?.innerText?.trim().length??0,sample:document.body?.innerText?.trim().slice(0,300)??''})",
         returnByValue: true,
       },
     }));
@@ -50,11 +50,11 @@ async function main() {
         const page = pages.find((item) => item.type === "page" && item.url === "app://-/index.html");
         if (page) {
           const rendered = await inspectPage(page.webSocketDebuggerUrl);
-          if (rendered?.root && rendered.titlebar && rendered.text > 10) {
+          if (rendered?.root && (rendered.titlebar || rendered.signIn) && rendered.text > 10) {
             console.log(`[ok] Windows app rendered (${rendered.text} visible characters)`);
             return;
           }
-          last = `root=${rendered?.root} titlebar=${rendered?.titlebar} visible characters=${rendered?.text} text=${JSON.stringify(rendered?.sample)}`;
+          last = `root=${rendered?.root} titlebar=${rendered?.titlebar} signIn=${rendered?.signIn} visible characters=${rendered?.text} text=${JSON.stringify(rendered?.sample)}`;
         }
       } catch (error) {
         last = error.message;
