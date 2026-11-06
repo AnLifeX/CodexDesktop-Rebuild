@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { listJavaScriptFiles } = require("./patch-util");
 /**
  * Keep local history visible across auth/provider changes.
  *
@@ -14,11 +15,11 @@ const LOCAL_HOST_MARKER = "/* CodexRebuildLocalSessionHost */";
 const ROOT_HOST_MARKER = "/* CodexRebuildWorkspaceRootHost */";
 
 const LOCAL_HOST_PATTERN =
-  /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\.threadProjectAssignments\?\.\[\2\.conversationId\]/g;
+  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\.threadProjectAssignments\?\.\[\2\.conversationId\]/g;
 const ROOT_HOST_PATTERN =
-  /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\5\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
+  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\5\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
 const CURRENT_ROOT_HOST_PATTERN =
-  /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.hostId==null\|\|([A-Za-z_$][\w$]*)\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId([^;]*);(if\([^;]+\)continue;)let ([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\7\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
+  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId([^;]*);(if\([^;]+\)continue;)let ([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\7\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;
@@ -78,7 +79,7 @@ function locatePlatformCandidates(platform) {
   const assetsDir = path.join(SRC_DIR, platform, "_asar", "webview", "assets");
   if (!fs.existsSync(assetsDir)) return [];
   const candidates = [];
-  for (const fileName of fs.readdirSync(assetsDir)) {
+  for (const fileName of listJavaScriptFiles(assetsDir)) {
     if (!fileName.endsWith(".js")) continue;
     const filePath = path.join(assetsDir, fileName);
     const source = fs.readFileSync(filePath, "utf8");

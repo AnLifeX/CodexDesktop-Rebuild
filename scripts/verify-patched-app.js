@@ -790,6 +790,8 @@ function inspectFastContract(sources) {
     const candidates = patchCandidates(sources, ["webview/assets"]).filter(
       ({ fileName, source }) =>
         source.includes("fast_mode") ||
+        source.includes("serviceTierAccess") ||
+        source.includes("amazonBedrock") ||
         source.includes("CodexRebuildFastModeModelCapabilityOnly") ||
         /^use-service-tier-settings-.*\.js$/.test(fileName) ||
         /^read-service-tier-for-request-.*\.js$/.test(fileName),
@@ -996,7 +998,7 @@ function isVerificationSource(asarRoot, filePath) {
   if (/^\.vite\/build\/(?:early-bootstrap(?:-\d+-[\da-f]+)?|preload|bootstrap(?:-[A-Za-z0-9_$-]+)?|main-.*)\.js$/.test(relative)) {
     return true;
   }
-  return /^webview\/assets\/(?:app-initial|app-primary|app-shared|app-shell|data-controls|use-service-tier-settings|read-service-tier-for-request|use-is-plugins-enabled)-.*\.js$/.test(
+  return /^webview\/assets\/.+\.js$/.test(
     relative,
   );
 }
