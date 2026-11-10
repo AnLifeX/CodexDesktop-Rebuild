@@ -95,7 +95,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
-      - run: choco install 7zip -y
+      - run: if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) { choco install 7zip -y }
       - name: Add 7zz alias
         run: |
           Copy-Item "C:\Program Files\7-Zip\7z.exe" "C:\Program Files\7-Zip\7zz.exe"

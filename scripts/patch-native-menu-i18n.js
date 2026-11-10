@@ -13,7 +13,7 @@
  */
 const fs = require("fs");
 const path = require("path");
-const { locateBundles, relPath } = require("./patch-util");
+const { locateBundles, relPath, listJavaScriptFiles } = require("./patch-util");
 
 const MENU_LABEL_KEYS = ["label", "menuTitle"];
 const ROLE_LABEL_TRANSLATIONS = [
@@ -574,8 +574,7 @@ function locateWebviewCommandTargets(platforms) {
   for (const plat of platforms ?? ["mac-arm64", "mac-x64", "win"]) {
     const dir = path.join(__dirname, "..", "src", plat, "_asar", "webview", "assets");
     if (!fs.existsSync(dir)) continue;
-    for (const name of fs.readdirSync(dir)) {
-      if (!name.endsWith(".js")) continue;
+    for (const name of listJavaScriptFiles(dir)) {
       const filePath = path.join(dir, name);
       const source = fs.readFileSync(filePath, "utf8");
       if (
