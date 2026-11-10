@@ -12,6 +12,15 @@ const workflows = ["build.yml", "sync.yml"].map((name) => ({
   ).replace(/\r\n/g, "\n"),
 }));
 
+test("Windows builds reuse preinstalled 7-Zip before contacting Chocolatey", () => {
+  for (const { name, text } of workflows) {
+    assert.ok(
+      text.includes('run: if (-not (Test-Path "C:\\Program Files\\7-Zip\\7z.exe")) { choco install 7zip -y }'),
+      `${name} must only install 7-Zip when the runner does not have it`,
+    );
+  }
+});
+
 test("workflows do not create or restore dependency caches", () => {
   const workflowDir = path.join(__dirname, "..", ".github", "workflows");
   for (const name of fs.readdirSync(workflowDir).filter((entry) => /\.ya?ml$/i.test(entry))) {
