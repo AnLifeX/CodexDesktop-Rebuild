@@ -262,3 +262,42 @@ test("runs the Computer Use compatibility patch in the standard patch pipeline",
     "native helper compatibility must be patched before updater bundle patches",
   );
 });
+
+// 26.1120 helper: QI error branch joins the success path instead of returning.
+const NATIVE_TOLERANT_QI = Buffer.from(
+  "488d1500000000" + "4c8d442470ff1089c1e89e49fcff85d274074889c689d5eb30" +
+    "4c8b6424704d85e40f8483040000498b04244c89e131d2ff503889c1e87249fcff4889c689d5498b04244c89e1ff5010",
+  "hex",
+);
+
+function createNativeTolerantFixture(mutate = () => {}) {
+  const source = createFixture();
+  source.fill(0, 0x850, 0x850 + ERROR_MARKER.length);
+  source.fill(0, 0x400, 0x800);
+  const queryOffset = 0x500;
+  const code = Buffer.from(NATIVE_TOLERANT_QI);
+  code.writeInt32LE(0x20c0 - (0x1100 + 7), 3);
+  mutate(code);
+  code.copy(source, queryOffset);
+  return source;
+}
+
+test("accepts the 26.1120 helper that already tolerates the optional border QI", () => {
+  const source = createNativeTolerantFixture();
+  const result = patchComputerUseBuffer(source);
+  assert.equal(result.status, "native-tolerant");
+  assert.deepEqual(result.buffer, source);
+});
+
+test("fails closed when the markerless helper still propagates the border QI error", () => {
+  // Error branch returns instead of jumping to the shared continuation.
+  assert.throws(
+    () => patchComputerUseBuffer(createNativeTolerantFixture((code) => code.writeUInt8(0xc3, 30))),
+    /Expected one SetIsBorderRequired marker, found 0/,
+  );
+  // Success path no longer calls put_IsBorderRequired(false).
+  assert.throws(
+    () => patchComputerUseBuffer(createNativeTolerantFixture((code) => code.writeUInt8(0x40, 57))),
+    /Expected one SetIsBorderRequired marker, found 0/,
+  );
+});

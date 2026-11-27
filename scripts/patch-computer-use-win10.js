@@ -294,10 +294,51 @@ function locateExistingPatch(buffer, sections, text, xrefOffset, skipRva) {
   return candidates[0] ?? null;
 }
 
+// Since 26.1120 the helper drops the "SetIsBorderRequired failed" context and
+// tolerates the optional border QI itself: the QI error branch jumps straight
+// to the same continuation the success branch (put_IsBorderRequired(false) and
+// Release) falls into, so Windows 10's E_NOINTERFACE no longer aborts capture.
+// Only that exact shape is accepted; anything else still fails closed.
+function detectNativeBorderTolerance(buffer, sections, text) {
+  const iidOffsets = findAll(buffer, BORDER_SESSION_IID);
+  if (iidOffsets.length !== 1) return null;
+  const iidRva = fileOffsetToRva(sections, iidOffsets[0]);
+  const xrefs = [];
+  const end = text.rawOffset + text.rawSize - 7;
+  for (let offset = text.rawOffset; offset <= end; offset++) {
+    if (!matchesBytes(buffer, offset, [0x48, 0x8d, 0x15])) continue;
+    const rva = fileOffsetToRva(sections, offset);
+    if (rva + 7 + buffer.readInt32LE(offset + 3) === iidRva) xrefs.push(offset);
+  }
+  if (xrefs.length !== 1) return null;
+  const lea = xrefs[0];
+  if (
+    !matchesBytes(buffer, lea + 7, [0x4c, 0x8d, 0x44, 0x24]) ||
+    !matchesBytes(buffer, lea + 12, [0xff, 0x10, 0x89, 0xc1, 0xe8]) ||
+    !matchesBytes(buffer, lea + 21, [0x85, 0xd2, 0x74])
+  ) {
+    return null;
+  }
+  const errorBranch = lea + 25;
+  const success = errorBranch + buffer.readInt8(lea + 24);
+  if (success - errorBranch < 2 || success - errorBranch > 16 || buffer[success - 2] !== 0xeb) return null;
+  const join = success + buffer.readInt8(success - 1);
+  if (join - success < 8 || join - success > 96) return null;
+  const successPath = buffer.subarray(success, join);
+  const setsBorderFalse = findAll(successPath, Buffer.from([0x31, 0xd2, 0xff, 0x50, 0x38])).length === 1;
+  const releasesBeforeJoin = matchesBytes(buffer, join - 3, [0xff, 0x50, 0x10]);
+  if (!setsBorderFalse || !releasesBeforeJoin || successPath.includes(0xc3)) return null;
+  return { queryOffset: lea, joinOffset: join };
+}
+
 function patchComputerUseBuffer(input) {
   const buffer = Buffer.from(input);
   const { sections, text } = readPeLayout(buffer);
   const markerOffsets = findAll(buffer, ERROR_MARKER);
+  if (markerOffsets.length === 0) {
+    const native = detectNativeBorderTolerance(buffer, sections, text);
+    if (native) return { buffer, status: "native-tolerant", ...native };
+  }
   if (markerOffsets.length !== 1) {
     throw new Error(`Expected one SetIsBorderRequired marker, found ${markerOffsets.length}`);
   }
@@ -379,6 +420,10 @@ function main() {
   const result = patchComputerUseBuffer(source);
   if (result.status === "already-patched") {
     console.log(`  [ok] ${relPath(target)}: Windows 10 screenshot compatibility already patched`);
+    return;
+  }
+  if (result.status === "native-tolerant") {
+    console.log(`  [ok] ${relPath(target)}: upstream already ignores the optional capture border QI failure`);
     return;
   }
   if (result.status === "skipped-no-padding") {
