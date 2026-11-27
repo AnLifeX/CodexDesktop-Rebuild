@@ -89,3 +89,15 @@ for (const [name, transform] of [
     }
   });
 }
+
+test("patches the 26.1120 group layout where thread assignments drop optional chaining", () => {
+  const source = LATEST_SOURCE.replace(
+    "p=u?.threadProjectAssignments?.[e.conversationId];return d+p",
+    "p=u.threadProjectAssignments?.[e.conversationId];return d+p",
+  );
+  const first = patchProjectGroupSource(source);
+  assert.equal(first.status, "patched");
+  assert.deepEqual(first.counts, { local: 1, root: 1 });
+  assert.ok(first.code.includes(`${LOCAL_HOST_MARKER}?c:e.hostId,p=u.threadProjectAssignments?.[e.conversationId]`));
+  assert.equal(patchProjectGroupSource(first.code).code, first.code);
+});

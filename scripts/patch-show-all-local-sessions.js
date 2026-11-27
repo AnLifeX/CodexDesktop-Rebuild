@@ -15,7 +15,7 @@ const LOCAL_HOST_MARKER = "/* CodexRebuildLocalSessionHost */";
 const ROOT_HOST_MARKER = "/* CodexRebuildWorkspaceRootHost */";
 
 const LOCAL_HOST_PATTERN =
-  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\.threadProjectAssignments\?\.\[\2\.conversationId\]/g;
+  /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)(\??)\.threadProjectAssignments\?\.\[\2\.conversationId\]/g;
 const ROOT_HOST_PATTERN =
   /let ([A-Za-z_$][\w$]*)=(?=(?:null==)?([A-Za-z_$][\w$]*)\.hostId)(?:\2\.hostId==null|null==\2\.hostId)\|\|([A-Za-z_$][\w$]*|\(0,[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\))\(\2\.hostId\)\?([A-Za-z_$][\w$]*):\2\.hostId,([A-Za-z_$][\w$]*)=\2\.cwd;if\(!\5\|\|\1!==\4&&!([A-Za-z_$][\w$]*)\.has\(\1\)\)continue;/g;
 const CURRENT_ROOT_HOST_PATTERN =
@@ -61,8 +61,8 @@ function patchProjectGroupSource(source) {
     );
   }
   if (localMatches.length === 1) {
-    code = code.replace(LOCAL_HOST_PATTERN, (_match, host, thread, isLocal, primary, assignment, options) =>
-      `let ${host}=${thread}.hostId==null||${isLocal}(${thread}.hostId)||!(${options}?.enabledRemoteHostIds?.has(${thread}.hostId)||${options}?.remoteProjects?.some(t=>t.hostId===${thread}.hostId))${LOCAL_HOST_MARKER}?${primary}:${thread}.hostId,${assignment}=${options}?.threadProjectAssignments?.[${thread}.conversationId]`,
+    code = code.replace(LOCAL_HOST_PATTERN, (_match, host, thread, isLocal, primary, assignment, options, optional) =>
+      `let ${host}=${thread}.hostId==null||${isLocal}(${thread}.hostId)||!(${options}?.enabledRemoteHostIds?.has(${thread}.hostId)||${options}?.remoteProjects?.some(t=>t.hostId===${thread}.hostId))${LOCAL_HOST_MARKER}?${primary}:${thread}.hostId,${assignment}=${options}${optional}.threadProjectAssignments?.[${thread}.conversationId]`,
     );
   }
   return {
