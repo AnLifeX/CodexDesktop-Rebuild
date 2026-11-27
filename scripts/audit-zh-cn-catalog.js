@@ -14,6 +14,8 @@ const path = require("node:path");
 const { parse } = require("acorn");
 const {
   ZH_CN_TRANSLATIONS,
+  catalogAssetReader,
+  codexGzipCatalog,
   webpackCatalog,
   locateTargets: locateCatalogTargets,
 } = require("./patch-zh-cn-catalog");
@@ -150,8 +152,10 @@ function exportedDefaultBinding(ast) {
   return unique[0];
 }
 
-function extractCatalogMessages(source, fileName = "<zh-CN catalog>") {
+function extractCatalogMessages(source, fileName = "<zh-CN catalog>", { readAsset } = {}) {
   const ast = parseModule(source, fileName);
+  const gzip = codexGzipCatalog(source, null, readAsset);
+  if (gzip) return gzip.messages;
   const webpack = webpackCatalog(source);
   if (webpack) return webpack.messages;
   const binding = exportedDefaultBinding(ast);
@@ -295,6 +299,7 @@ function auditPlatform(platform = "win", options = {}) {
   const catalog = extractCatalogMessages(
     fs.readFileSync(catalogPath, "utf8"),
     path.basename(catalogPath),
+    { readAsset: catalogAssetReader(catalogPath) },
   );
   const collected = collectAssetDescriptors(assetsDir);
   const consolidated = consolidateDescriptors(collected.descriptors);

@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
   ZH_CN_FORCED_OVERRIDES,
   ZH_CN_TRANSLATIONS,
+  catalogAssetReader,
   locateTargets,
   patchCatalogSource,
 } = require("./patch-zh-cn-catalog");
@@ -179,8 +180,9 @@ test("translation specs cover the queued-message side-chat action", () => {
     if (id === "composer.queuedMessage.openInSideChat") descriptors.push([null, id, defaultMessage]);
   }
 
-  assert.equal(descriptors.length, 1, "expected the queued side-chat action");
-  assert.equal(descriptors[0][2], "Open in side chat");
+  // Upstream can bundle the same descriptor into several chunks.
+  assert.ok(descriptors.length >= 1, "expected the queued side-chat action");
+  assert.ok(descriptors.every(([, , message]) => message === "Open in side chat"));
   assert.equal(
     ZH_CN_TRANSLATIONS.get(descriptors[0][1]),
     "在侧边聊天中打开",
@@ -457,9 +459,10 @@ test("patches the extracted Windows zh-CN catalog in memory", () => {
   const targets = locateTargets("win");
   assert.equal(targets.length, 1);
   const source = fs.readFileSync(targets[0].path, "utf8");
-  const localized = patchCatalogSource(source).code;
-  const before = extractCatalogMessages(source);
-  const after = extractCatalogMessages(localized);
+  const options = { readAsset: catalogAssetReader(targets[0].path) };
+  const localized = patchCatalogSource(source, undefined, undefined, options).code;
+  const before = extractCatalogMessages(source, undefined, options);
+  const after = extractCatalogMessages(localized, undefined, options);
   for (const [messageId, translation] of ZH_CN_TRANSLATIONS) {
     const expected = before.has(messageId)
       ? (ZH_CN_FORCED_OVERRIDES.get(messageId) ?? before.get(messageId))
@@ -517,6 +520,49 @@ test("follows the zh-CN chunk and module binding and rejects ambiguous locales",
     fs.unlinkSync(path.join(asyncDir, "duplicate-loader.js"));
     fs.writeFileSync(target, webpackFixture({ title: "错误模块" }, "other"));
     assert.throws(() => locateTargets("win", root), /Expected one webpack catalog export, found 0/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("patches 26.1120 gzip catalogs through the zh-CN loader without touching shared keys", () => {
+  const zlib = require("node:zlib");
+  const root = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "zh-gzip-"));
+  const assets = path.join(root, "win", "_asar", "webview", "assets");
+  const asyncDir = path.join(assets, "async");
+  const localesDir = path.join(assets, "locales");
+  fs.mkdirSync(asyncDir, { recursive: true });
+  fs.mkdirSync(localesDir, { recursive: true });
+  try {
+    const keysFile = path.join(localesDir, "keys.k1.json.codex-gzip");
+    fs.writeFileSync(keysFile, zlib.gzipSync(JSON.stringify(["existing", "override"])));
+    fs.writeFileSync(path.join(localesDir, "zh-CN.keys.k1.v1.json.codex-gzip"), zlib.gzipSync(JSON.stringify(["保留", "旧值"])));
+    const keysBefore = fs.readFileSync(keysFile);
+    fs.writeFileSync(
+      path.join(asyncDir, "loader.js"),
+      'var locales={"../locales/zh-CN.json":function(){return i.e(547807).then(i.bind(i,"F4or"))}};',
+    );
+    const target = path.join(asyncDir, "547807.hash.js");
+    fs.writeFileSync(
+      target,
+      'export const __rspack_esm_ids=[547807];export const __webpack_modules__={F4or(e,o,s){s.a(e,async function(e,a){try{async function t(e){return(await fetch(s.p+e)).json()}s.r(o);let[e,c]=await Promise.all([t("assets/locales/keys.k1.json.codex-gzip"),t("assets/locales/zh-CN.keys.k1.v1.json.codex-gzip")]);o.default=Object.fromEntries(e.map((e,o)=>[e,c[o]])),a()}catch(e){a(e)}},1)}};',
+    );
+    assert.deepEqual(locateTargets("win", root), [{ platform: "win", path: target }]);
+    const options = { readAsset: catalogAssetReader(target) };
+    const translations = new Map([["existing", "不要覆盖"], ["override", "纠正"], ["added", "新增\"引号"]]);
+    const source = fs.readFileSync(target, "utf8");
+    const first = patchCatalogSource(source, translations, new Map([["override", "纠正"]]), options);
+    assert.deepEqual(first.replacements.map(({ messageId, status }) => [messageId, status]), [["override", "updated"], ["added", "added"]]);
+    assert.match(first.code, /o\.default=Object\.assign\(Object\.fromEntries\(e\.map\(\(e,o\)=>\[e,c\[o\]\]\)\),JSON\.parse\(/);
+    assert.deepEqual(
+      [...extractCatalogMessages(first.code, undefined, options)],
+      [["existing", "保留"], ["override", "纠正"], ["added", "新增\"引号"]],
+    );
+    const second = patchCatalogSource(first.code, translations, new Map([["override", "纠正"]]), options);
+    assert.equal(second.code, first.code);
+    assert.equal(second.replacements.length, 0);
+    assert.deepEqual(fs.readFileSync(keysFile), keysBefore);
+    assert.throws(() => patchCatalogSource(source, translations), /requires an asset reader/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -13,6 +13,7 @@ const {
   isCoreUiCandidate,
   isLikelyEnglishFallback,
 } = require("./audit-zh-cn-catalog");
+const { catalogAssetReader } = require("./patch-zh-cn-catalog");
 
 test("extracts static descriptors regardless of property order", () => {
   const source = [
@@ -113,5 +114,9 @@ test("audits the current extracted Windows catalog", () => {
   );
   assert.ok(!report.missing.some((item) => item.id === "composer.queuedMessage.openInSideChat"));
   assert.ok(fs.existsSync(report.catalogPath));
-  assert.ok(extractCatalogMessages(fs.readFileSync(report.catalogPath, "utf8")).size > 1000);
+  assert.ok(
+    extractCatalogMessages(fs.readFileSync(report.catalogPath, "utf8"), undefined, {
+      readAsset: catalogAssetReader(report.catalogPath),
+    }).size > 1000,
+  );
 });

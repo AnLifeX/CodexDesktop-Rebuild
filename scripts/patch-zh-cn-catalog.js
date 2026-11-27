@@ -11,6 +11,7 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
+const zlib = require("node:zlib");
 const { parse } = require("acorn");
 const { SRC_DIR, relPath, listJavaScriptFiles } = require("./patch-util");
 
@@ -1653,6 +1654,103 @@ function webpackCatalog(source, moduleId) {
   return candidates[0];
 }
 
+// Since 26.1120 the zh-CN module is a small loader that fetches two gzip JSON
+// arrays at runtime: the key list shared by every locale and the zh-CN values
+// in the same order. The shared key file must stay untouched, so additions and
+// corrections are merged in the loader with Object.assign over a JSON literal.
+const CODEX_GZIP_SUFFIX = ".json.codex-gzip";
+
+function isObjectFromEntries(node) {
+  return node?.type === "CallExpression" &&
+    node.callee?.type === "MemberExpression" && !node.callee.computed &&
+    node.callee.object?.name === "Object" && node.callee.property?.name === "fromEntries" &&
+    node.arguments.length === 1;
+}
+
+function codexGzipCatalog(source, moduleId, readAsset) {
+  if (!source.includes(CODEX_GZIP_SUFFIX)) return null;
+  const ast = parse(source, { ecmaVersion: "latest", sourceType: "module" });
+  const tables = ast.body.filter((node) => node.type === "ExportNamedDeclaration")
+    .flatMap((node) => node.declaration?.declarations ?? [])
+    .filter((node) => node.id?.name === "__webpack_modules__");
+  if (tables.length !== 1 || tables[0].init?.type !== "ObjectExpression") return null;
+  const modules = tables[0].init.properties.filter((node) =>
+    moduleId == null || catalogPropertyKey(node) === moduleId);
+  const candidates = [];
+  for (const module of modules) {
+    const assets = [];
+    const assignments = [];
+    walk(module.value, (node) => {
+      if (node.type === "Literal" && typeof node.value === "string" && node.value.endsWith(CODEX_GZIP_SUFFIX)) {
+        assets.push(node.value);
+      }
+      if (
+        node.type === "AssignmentExpression" && node.operator === "=" &&
+        node.left?.type === "MemberExpression" && !node.left.computed && node.left.property?.name === "default"
+      ) {
+        assignments.push(node);
+      }
+    });
+    if (assets.length === 0) continue;
+    const keysAsset = assets.filter((name) => /(^|\/)keys\.[^/]+$/.test(name));
+    const valuesAsset = assets.filter((name) => /(^|\/)zh-CN\.keys\.[^/]+$/.test(name));
+    if (assets.length !== 2 || keysAsset.length !== 1 || valuesAsset.length !== 1 || assignments.length !== 1) {
+      throw new Error("Unexpected zh-CN gzip catalog loader layout");
+    }
+    const right = assignments[0].right;
+    let fromEntries = null;
+    let overlay = null;
+    if (isObjectFromEntries(right)) {
+      fromEntries = right;
+    } else if (
+      right?.type === "CallExpression" && right.callee?.type === "MemberExpression" &&
+      right.callee.object?.name === "Object" && right.callee.property?.name === "assign" &&
+      right.arguments.length === 2 && isObjectFromEntries(right.arguments[0]) &&
+      right.arguments[1]?.type === "CallExpression" &&
+      right.arguments[1].callee?.object?.name === "JSON" && right.arguments[1].callee?.property?.name === "parse" &&
+      right.arguments[1].arguments[0]?.type === "Literal" && typeof right.arguments[1].arguments[0].value === "string"
+    ) {
+      fromEntries = right.arguments[0];
+      overlay = JSON.parse(right.arguments[1].arguments[0].value);
+    } else {
+      throw new Error("Unexpected zh-CN gzip catalog assignment");
+    }
+    candidates.push({ assignment: assignments[0], fromEntries, overlay, keysAsset: keysAsset[0], valuesAsset: valuesAsset[0] });
+  }
+  if (candidates.length === 0) return null;
+  if (candidates.length !== 1) throw new Error(`Expected one zh-CN gzip catalog loader, found ${candidates.length}`);
+  if (typeof readAsset !== "function") throw new Error("zh-CN gzip catalog requires an asset reader");
+  const candidate = candidates[0];
+  const keys = JSON.parse(zlib.gunzipSync(readAsset(candidate.keysAsset)).toString("utf8"));
+  const values = JSON.parse(zlib.gunzipSync(readAsset(candidate.valuesAsset)).toString("utf8"));
+  if (!Array.isArray(keys) || !Array.isArray(values) || keys.length !== values.length) {
+    throw new Error("zh-CN gzip catalog keys and values do not align");
+  }
+  const base = new Map();
+  keys.forEach((key, index) => {
+    if (typeof key !== "string" || typeof values[index] !== "string" || base.has(key)) {
+      throw new Error("Invalid or duplicate zh-CN gzip catalog entry");
+    }
+    base.set(key, values[index]);
+  });
+  const messages = new Map(base);
+  for (const [key, value] of Object.entries(candidate.overlay ?? {})) messages.set(key, value);
+  return { ...candidate, base, messages };
+}
+
+// The loader fetches relative to the webview public path, i.e. the directory
+// that contains "assets/".
+function catalogAssetReader(catalogPath) {
+  let root = path.dirname(catalogPath);
+  while (path.basename(root) !== "assets") {
+    const parent = path.dirname(root);
+    if (parent === root) throw new Error(`zh-CN catalog is not inside an assets directory: ${catalogPath}`);
+    root = parent;
+  }
+  const publicPath = path.dirname(root);
+  return (relative) => fs.readFileSync(path.join(publicPath, ...relative.split("/")));
+}
+
 function patchCatalogSource(
   source,
   translations = ZH_CN_TRANSLATIONS,
@@ -1660,7 +1758,35 @@ function patchCatalogSource(
     translations === ZH_CN_TRANSLATIONS
       ? ZH_CN_FORCED_OVERRIDES
       : new Map(),
+  { readAsset } = {},
 ) {
+  const gzip = codexGzipCatalog(source, null, readAsset);
+  if (gzip) {
+    const { base, messages, overlay, assignment, fromEntries } = gzip;
+    const desiredOverlay = {};
+    for (const [messageId, translation] of translations) {
+      const upstream = base.get(messageId);
+      const desired = upstream == null ? translation : overrides.get(messageId);
+      if (desired != null && desired !== upstream) desiredOverlay[messageId] = desired;
+    }
+    const replacements = [];
+    for (const [messageId, translation] of Object.entries(desiredOverlay)) {
+      const current = messages.get(messageId);
+      if (current === translation) continue;
+      const upstream = base.get(messageId);
+      replacements.push({ messageId, translation, status: upstream == null ? "added" : "updated", ...(upstream == null ? {} : { from: upstream }) });
+    }
+    const unchanged = JSON.stringify(overlay ?? {}) === JSON.stringify(desiredOverlay);
+    if (unchanged) return { code: source, replacements };
+    const fromEntriesSource = source.slice(fromEntries.start, fromEntries.end);
+    const right = Object.keys(desiredOverlay).length === 0
+      ? fromEntriesSource
+      : `Object.assign(${fromEntriesSource},JSON.parse(${JSON.stringify(JSON.stringify(desiredOverlay))}))`;
+    return {
+      code: source.slice(0, assignment.right.start) + right + source.slice(assignment.right.end),
+      replacements,
+    };
+  }
   const webpack = webpackCatalog(source);
   if (webpack) {
     const { messages, literal } = webpack;
@@ -1773,14 +1899,19 @@ function locateTargets(platform, sourceDir = SRC_DIR) {
       for (const file of files) {
         const source = fs.readFileSync(path.join(assetsDir, file), "utf8");
         if (!source.includes("../locales/zh-CN.json")) continue;
-        for (const match of source.matchAll(/"\.\.\/locales\/zh-CN\.json":function\(\)\{return (\w+)\.e\((\d+)\)\.then\(\1\.t\.bind\(\1,"([^"\n]+)",19\)\)\}/g)) {
-          bindings.push({ chunk: match[2], moduleId: match[3] });
+        // JSON chunks bind with t.bind(r,id,19); 26.1120 gzip loaders use a plain bind(r,id).
+        for (const match of source.matchAll(/"\.\.\/locales\/zh-CN\.json":function\(\)\{return (\w+)\.e\((\d+)\)\.then\(\1\.(?:t\.bind\(\1,"([^"\n]+)",19\)|bind\(\1,"([^"\n]+)"\))\)\}/g)) {
+          bindings.push({ chunk: match[2], moduleId: match[3] ?? match[4] });
         }
       }
       if (bindings.length !== 1) throw new Error(`Expected one zh-CN locale binding, found ${bindings.length}`);
       const binding = bindings[0];
       for (const file of files.filter((file) => path.basename(file).startsWith(binding.chunk + "."))) {
-        const catalog = webpackCatalog(fs.readFileSync(path.join(assetsDir, file), "utf8"), binding.moduleId);
+        const filePath = path.join(assetsDir, file);
+        const source = fs.readFileSync(filePath, "utf8");
+        const catalog =
+          codexGzipCatalog(source, binding.moduleId, catalogAssetReader(filePath)) ??
+          webpackCatalog(source, binding.moduleId);
         if (catalog) matches.push(file);
       }
     }
@@ -1809,7 +1940,9 @@ function main() {
   let total = 0;
   for (const target of targets) {
     const source = fs.readFileSync(target.path, "utf8");
-    const result = patchCatalogSource(source);
+    const result = patchCatalogSource(source, undefined, undefined, {
+      readAsset: catalogAssetReader(target.path),
+    });
     total += result.replacements.length;
     console.log(`\n-- [${target.platform}] ${relPath(target.path)}`);
     if (result.replacements.length === 0) {
@@ -1844,6 +1977,8 @@ module.exports = {
   ZH_CN_FORCED_OVERRIDES,
   ZH_CN_TRANSLATIONS,
   ZH_CN_TRANSLATION_SPECS,
+  catalogAssetReader,
+  codexGzipCatalog,
   locateTargets,
   webpackCatalog,
   patchCatalogSource,
