@@ -21,8 +21,9 @@ const DEFAULT_WINDOWS_UPDATE_PROXY_PREFIXES = [
   "https://gh-proxy.com/",
   "https://ghproxy.net/",
 ];
-const LOCAL_UPDATER_CONTRACT_VERSION = 15;
-const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+const LOCAL_UPDATER_CONTRACT_VERSION = 16;
+const STRUCTURAL_LOCAL_UPDATER_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+const PROJECT_REPOSITORY_URL = "https://github.com/anlifex/CodexDesktop-Rebuild";
 const START_MARKER = "/* CodexRebuildLocalUpdater:start */";
 const END_MARKER = "/* CodexRebuildLocalUpdater:end */";
 const FILE_END_MARKER = "/* CodexRebuildLocalUpdater:file-end */";
@@ -864,6 +865,7 @@ function CodexRebuildSetupLocalUpdater(app,autoUpdater,dialog,ipcMain,BrowserWin
         if(command==='retry')return state.updateFile?startDownload(request):checkOnly(!0);
         if(command==='cancel')return cancelDownload();
         if(command==='clear')return clearStatus();
+        if(command==='open-repository'){await require('electron').shell.openExternal(${JSON.stringify(PROJECT_REPOSITORY_URL)});return!0}
         if(command==='install'){
           return installUpdate();
         }
@@ -941,6 +943,7 @@ ${versionLine};(()=>{try{
     cancelDownload:()=>invoke('cancel'),
     installUpdate:()=>invoke('install'),
     clearUpdateState:()=>invoke('clear'),
+    openRepository:()=>invoke('open-repository'),
     onState:t=>{if(typeof t!=='function')return()=>{};listeners.add(t);return()=>listeners.delete(t)}
   };
   ${electronAlias}.ipcRenderer.on(channelState,(_event,state)=>{for(const listener of listeners){try{listener(state)}catch{}}});
@@ -1493,6 +1496,11 @@ function makeWebviewMenuBarFunctionBody() {
 '.cru-label{min-width:0;overflow:hidden;text-overflow:ellipsis}',
 '.cru-popover{-webkit-app-region:no-drag;position:fixed;inset:auto;margin:0;width:min(328px,calc(100vw - 24px));overflow:auto;border:1px solid color-mix(in srgb,var(--color-token-border-default) 78%,transparent);border-radius:10px;background:color-mix(in srgb,var(--color-token-main-surface-primary) 96%,black 4%);color:var(--color-token-text-primary);box-shadow:0 18px 48px rgb(0 0 0 / .28);padding:12px;box-sizing:border-box;backdrop-filter:blur(18px);animation:cru-pop .14s ease-out;cursor:default}',
 '.cru-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}',
+'.cru-copy{flex:1;min-width:0}',
+'.cru-repo{-webkit-app-region:no-drag;display:flex;width:24px;height:24px;flex:0 0 24px;align-items:center;justify-content:center;margin:-2px -4px 0 0;padding:0;border:0;border-radius:7px;background:transparent;color:var(--color-token-text-tertiary);cursor:pointer;transition:background .14s ease,color .14s ease}',
+'.cru-repo:hover{background:color-mix(in srgb,var(--color-token-foreground) 8%,transparent);color:var(--color-token-text-primary)}',
+'.cru-repo:focus-visible{outline:2px solid color-mix(in srgb,var(--color-token-text-primary) 40%,transparent);outline-offset:1px}',
+'.cru-repo svg{width:15px;height:15px}',
 '.cru-badge{display:flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:8px;background:color-mix(in srgb,var(--color-token-foreground) 7%,transparent);color:var(--color-token-text-secondary);flex:0 0 22px}',
 '.cru-popover.available .cru-badge,.cru-popover.ready .cru-badge{background:color-mix(in srgb,var(--cru-success) 14%,transparent);color:var(--cru-success)}',
 '.cru-popover.error .cru-badge{background:color-mix(in srgb,var(--cru-error) 14%,transparent);color:var(--cru-error)}',
@@ -1519,7 +1527,7 @@ function makeWebviewMenuBarFunctionBody() {
 '.cru-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
 '@keyframes cru-spin{to{transform:rotate(360deg)}}',
 '@keyframes cru-pop{from{opacity:0;transform:translateY(-3px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}',
-'@media (prefers-reduced-motion: reduce){.cru-trigger,.cru-action,.cru-meter span,.cru-popover{transition:none;animation:none}.cru-trigger.checking .cru-mark,.cru-trigger.downloading .cru-mark,.cru-trigger.cancelling .cru-mark,.cru-trigger.preparing .cru-mark{animation:none}}'
+'@media (prefers-reduced-motion: reduce){.cru-trigger,.cru-action,.cru-repo,.cru-meter span,.cru-popover{transition:none;animation:none}.cru-trigger.checking .cru-mark,.cru-trigger.downloading .cru-mark,.cru-trigger.cancelling .cru-mark,.cru-trigger.preparing .cru-mark{animation:none}}'
 ].join('\\n'),document.head.appendChild(t)}
 function codexRebuildUpdaterShowPanel(e){let t=e?.querySelector('.cru-popover');if(!t)return;let n=()=>{let n=e.getBoundingClientRect(),r=Math.min(328,window.innerWidth-24),i=n.bottom+7;t.style.left=Math.max(12,Math.min(n.left,window.innerWidth-r-12))+'px',t.style.top=i+'px',t.style.maxHeight=Math.max(0,window.innerHeight-i-12)+'px'};n(),t.showPopover(),window.addEventListener('resize',n),window.addEventListener('scroll',n,true);return()=>{window.removeEventListener('resize',n),window.removeEventListener('scroll',n,true),t.matches(':popover-open')&&t.hidePopover()}}
 function codexRebuildUpdaterFormatVersion(e){return e?String(e).replace(/^(\\d+)\\.(\\d+)\\.(\\d+)-rebuild(\\d{4})$/i,(_,a,b,c,r)=>a+'.'+b+'.'+(Number(c)-1)+'-r'+Number(r)).replace(/-r0*([1-9]\\d*)$/i,' (r$1)'):'-'}
@@ -1550,7 +1558,7 @@ function codexRebuildUpdaterBuildPanel(e,t){
   (r==='checking'||r==='cancelling'||r==='preparing'||r==='no-update')&&d.push(l('收起','close'));
   let f=(0,Zr.jsx)('span',{className:'cru-mark','aria-hidden':'true'});
   let h=(r==='available'||(r==='error'||r==='paused')&&n.updateFile)&&(0,Zr.jsxs)('label',{className:'cru-proxy',children:[(0,Zr.jsx)('span',{className:'cru-proxy-label',children:'加速地址前缀（可选）'}),(0,Zr.jsx)('input',{type:'text',className:'cru-proxy-input',defaultValue:p(),placeholder:'https://ghfast.top/',onChange:m,'aria-label':'加速地址前缀'}),(0,Zr.jsx)('span',{className:'cru-proxy-help',children:'可填多个，使用分号或逗号分隔；留空自动选择线路。'})]});
-  return(0,Zr.jsxs)('div',{className:'cru-popover '+r,popover:'manual',role:'dialog','aria-label':'更新状态',onPointerDown:e=>e.stopPropagation(),children:[(0,Zr.jsx)('div',{className:'cru-live','aria-live':'polite',children:o}),(0,Zr.jsxs)('div',{className:'cru-head',children:[(0,Zr.jsx)('div',{className:'cru-badge','aria-hidden':'true',children:f}),(0,Zr.jsxs)('div',{children:[(0,Zr.jsx)('div',{className:'cru-title',children:o}),(0,Zr.jsx)('p',{className:'cru-body',children:s})]})]}),(r==='downloading'||r==='cancelling'||r==='preparing'||r==='paused')&&(0,Zr.jsx)('div',{className:'cru-meter','aria-label':'下载进度 '+a+'%',children:(0,Zr.jsx)('span',{style:{width:a+'%'}})}),(0,Zr.jsx)('div',{className:'cru-grid',children:u}),h,r==='error'&&(0,Zr.jsx)('div',{className:'cru-error',role:'alert',children:n.error||'未知错误'}),(0,Zr.jsx)('div',{className:'cru-actions',children:d})]})
+  return(0,Zr.jsxs)('div',{className:'cru-popover '+r,popover:'manual',role:'dialog','aria-label':'更新状态',onPointerDown:e=>e.stopPropagation(),children:[(0,Zr.jsx)('div',{className:'cru-live','aria-live':'polite',children:o}),(0,Zr.jsxs)('div',{className:'cru-head',children:[(0,Zr.jsx)('div',{className:'cru-badge','aria-hidden':'true',children:f}),(0,Zr.jsxs)('div',{className:'cru-copy',children:[(0,Zr.jsx)('div',{className:'cru-title',children:o}),(0,Zr.jsx)('p',{className:'cru-body',children:s})]}),(0,Zr.jsx)('button',{type:'button',className:'cru-repo',title:'GitHub 仓库','aria-label':'在 GitHub 上打开项目仓库',onClick:e=>{e.stopPropagation();let t=window.codexRebuildUpdater?.openRepository,n=()=>window.open(${JSON.stringify(PROJECT_REPOSITORY_URL)},'_blank','noopener,noreferrer');if(!t){n();return}t().catch(n)},children:(0,Zr.jsx)('svg',{viewBox:'0 0 16 16',fill:'currentColor','aria-hidden':'true',children:(0,Zr.jsx)('path',{d:'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'})})})]}),(r==='downloading'||r==='cancelling'||r==='preparing'||r==='paused')&&(0,Zr.jsx)('div',{className:'cru-meter','aria-label':'下载进度 '+a+'%',children:(0,Zr.jsx)('span',{style:{width:a+'%'}})}),(0,Zr.jsx)('div',{className:'cru-grid',children:u}),h,r==='error'&&(0,Zr.jsx)('div',{className:'cru-error',role:'alert',children:n.error||'未知错误'}),(0,Zr.jsx)('div',{className:'cru-actions',children:d})]})
 }
 function Yr(){let e=D(),[t,n]=(0,Xr.useState)(null),[r,i]=(0,Xr.useState)({status:'idle'}),[a,o]=(0,Xr.useState)(false),s=(0,Xr.useRef)(0),c=(0,Xr.useRef)(null);
   (0,Xr.useEffect)(()=>{codexRebuildUpdaterEnsureTitlebarStyle();let e=window.codexRebuildUpdater;if(!e)return;let t=e=>{i(e||{status:'idle'})};e.getState?.().then(t).catch(()=>{});let n=e.onState?.(t);return typeof n==='function'?n:void 0},[]);

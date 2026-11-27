@@ -1966,3 +1966,17 @@ test("adds updater menu items when Webpack removed the empty help extension", ()
   assert.match(patched, /codexRebuildMenu\.topItems/);
   assert.equal(patchMainMenuCode(patched), patched);
 });
+
+test("update popover links to the project repository through the updater bridge", () => {
+  const repository = "https://github.com/anlifex/CodexDesktop-Rebuild";
+  const preload = makePreloadPatch("e");
+  assert.ok(preload.includes("openRepository:()=>invoke('open-repository')"));
+  const bootstrap = makeBootstrapPrefix();
+  assert.ok(bootstrap.includes(`if(command==='open-repository'){await require('electron').shell.openExternal(${JSON.stringify(repository)});return!0}`));
+  const patched = patchWebviewMenuBarCode(LATEST_LOCAL_WEBVIEW_SOURCE);
+  assert.ok(patched.includes("className:'cru-repo'"));
+  assert.ok(patched.includes("'aria-label':'在 GitHub 上打开项目仓库'"));
+  assert.ok(patched.includes("let t=window.codexRebuildUpdater?.openRepository"));
+  assert.ok(patched.includes(`window.open(${JSON.stringify(repository)},'_blank','noopener,noreferrer')`));
+  assert.ok(patched.includes("'.cru-repo{"));
+});
