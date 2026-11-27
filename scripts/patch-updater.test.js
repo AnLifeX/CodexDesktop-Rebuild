@@ -4,7 +4,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { patchUpdaterSource, patchUpdaterContracts, locateTargets } = require("./patch-updater");
+const { patchUpdaterSource, patchUpdaterContracts, locateTargets, planBuildDir } = require("./patch-updater");
 
 const UPDATER_FIXTURE =
   "let policy={shouldIncludeSparkle:function(e,t,n){return m(e,t,`darwin`,n)},shouldIncludeWindowsUpdater:function(e,t,n){return h(e,t,n)&&g(e)!=null},shouldIncludeWindowsMsixUpdater:function(e,t,n){return h(e,t,n)&&g(e)?.kind===`msix`},shouldIncludeUpdater:function(e,t,n){return policy.shouldIncludeSparkle(e,t,n)||policy.shouldIncludeWindowsUpdater(e,t,n)}}";
@@ -90,4 +90,22 @@ test("rejects parse, zero, ambiguous, and half-contract updater inputs", () => {
     /shouldIncludeSparkle.*found 2/i,
   );
   assert.throws(() => patchUpdaterContracts({ loggerSource: UPDATER_FIXTURE }), /worker.*required/i);
+});
+
+test("disables every non-worker policy copy when upstream bundles several entries", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-updater-multi-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const name of ["worker.js", "early-bootstrap.js", "app-server-host.js"]) {
+    fs.writeFileSync(path.join(dir, name), UPDATER_FIXTURE);
+  }
+  const first = planBuildDir(dir, "win");
+  assert.deepEqual(first.files.sort(), ["app-server-host.js", "early-bootstrap.js", "worker.js"]);
+  assert.equal(first.counts.patchable, 12);
+  for (const write of first.writes) fs.writeFileSync(write.path, write.after);
+  const second = planBuildDir(dir, "win");
+  assert.equal(second.counts.patchable, 0);
+  assert.equal(second.counts.already, 12);
+  fs.unlinkSync(path.join(dir, "early-bootstrap.js"));
+  fs.unlinkSync(path.join(dir, "app-server-host.js"));
+  assert.throws(() => planBuildDir(dir, "win"), /logger expected at least 1 target/);
 });

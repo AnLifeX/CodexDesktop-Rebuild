@@ -166,6 +166,40 @@ function locateTargets(buildDir) {
   });
 }
 
+// Upstream can bundle the build-flavor policy into several main-process
+// entries (early-bootstrap, app-server-host, ...). Every copy outside the
+// worker must be disabled; the worker copy is still required exactly once.
+function planBuildDir(buildDir, platformName = path.basename(buildDir)) {
+  const files = locateTargets(buildDir);
+  const loggerNames = files.filter((name) => name !== "worker.js");
+  const workerNames = files.filter((name) => name === "worker.js");
+  if (loggerNames.length === 0) {
+    throw new Error(`updater logger expected at least 1 target for ${platformName}, found 0`);
+  }
+  if (workerNames.length !== 1) {
+    throw new Error(`updater worker expected exactly 1 target for ${platformName}, found ${workerNames.length}`);
+  }
+  const workerPath = path.join(buildDir, workerNames[0]);
+  const workerSource = fs.readFileSync(workerPath, "utf-8");
+  const targets = loggerNames.map((name) => {
+    const loggerPath = path.join(buildDir, name);
+    const loggerSource = fs.readFileSync(loggerPath, "utf-8");
+    return { name, loggerPath, loggerSource, result: patchUpdaterContracts({ loggerSource, workerSource }) };
+  });
+  const writes = targets.map(({ loggerPath, loggerSource, result }) => ({ path: loggerPath, before: loggerSource, after: result.logger.code }));
+  writes.push({ path: workerPath, before: workerSource, after: targets[0].result.worker.code });
+  const worker = targets[0].result.worker.counts;
+  const counts = targets.reduce(
+    (sum, { result }) => ({
+      patchable: sum.patchable + result.logger.counts.patchable,
+      already: sum.already + result.logger.counts.already,
+      total: sum.total + result.logger.counts.total,
+    }),
+    { patchable: worker.patchable, already: worker.already, total: worker.total },
+  );
+  return { platform: platformName, files: [...loggerNames, workerNames[0]], writes, counts };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const isCheck = args.includes("--check");
@@ -176,40 +210,17 @@ function main() {
         fs.existsSync(path.join(SRC_DIR, name, "_asar", ".vite", "build")),
       );
   if (platforms.length === 0) throw new Error("updater expected at least one platform");
-  const plans = platforms.map((platformName) => {
-    const buildDir = path.join(SRC_DIR, platformName, "_asar", ".vite", "build");
-    const files = locateTargets(buildDir);
-    const loggerNames = files.filter((name) => name !== "worker.js");
-    const workerNames = files.filter((name) => name === "worker.js");
-    if (loggerNames.length !== 1) {
-      throw new Error(`updater logger expected exactly 1 target for ${platformName}, found ${loggerNames.length}`);
-    }
-    if (workerNames.length !== 1) {
-      throw new Error(`updater worker expected exactly 1 target for ${platformName}, found ${workerNames.length}`);
-    }
-    const loggerPath = path.join(buildDir, loggerNames[0]);
-    const workerPath = path.join(buildDir, workerNames[0]);
-    const loggerSource = fs.readFileSync(loggerPath, "utf-8");
-    const workerSource = fs.readFileSync(workerPath, "utf-8");
-    return {
-      platform: platformName,
-      loggerPath,
-      workerPath,
-      loggerSource,
-      workerSource,
-      result: patchUpdaterContracts({ loggerSource, workerSource }),
-    };
-  });
+  const plans = platforms.map((platformName) =>
+    planBuildDir(path.join(SRC_DIR, platformName, "_asar", ".vite", "build"), platformName),
+  );
   for (const plan of plans) {
-    console.log(`  [${plan.platform}] ${isCheck ? "check" : plan.result.status}: patchable=${plan.result.counts.patchable} already=${plan.result.counts.already} expected=8`);
+    const status = isCheck ? "check" : plan.counts.patchable > 0 ? "patched" : "already";
+    console.log(`  [${plan.platform}] ${status}: patchable=${plan.counts.patchable} already=${plan.counts.already} expected=${plan.counts.total} (${plan.files.join(", ")})`);
   }
   if (!isCheck) {
     for (const plan of plans) {
-      if (plan.result.logger.code !== plan.loggerSource) {
-        fs.writeFileSync(plan.loggerPath, plan.result.logger.code, "utf-8");
-      }
-      if (plan.result.worker.code !== plan.workerSource) {
-        fs.writeFileSync(plan.workerPath, plan.result.worker.code, "utf-8");
+      for (const write of plan.writes) {
+        if (write.after !== write.before) fs.writeFileSync(write.path, write.after, "utf-8");
       }
     }
   }
@@ -218,4 +229,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { collectPatches, patchUpdaterSource, patchUpdaterContracts, locateTargets };
+module.exports = { collectPatches, patchUpdaterSource, patchUpdaterContracts, locateTargets, planBuildDir };
